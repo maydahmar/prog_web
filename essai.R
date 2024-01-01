@@ -46,97 +46,108 @@ analyseDeséquilibreClasses <- function(df, targetVariable) {
     NULL
   }
 }
-
 # UI
-ui <- fluidPage(
-  titlePanel("Analyse Avancée de Données"),
-  
-  sidebarLayout(
-    sidebarPanel(
-      fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt")),
-      actionButton("load", "Charger"),
-      checkboxInput("normalize", "Normaliser les données quantitatives", value = FALSE),
-      checkboxInput("dummy", "Dummification pour variables qualitatives", value = FALSE),
-      selectInput("variable", "Choisir une Variable pour le Graphique", choices = NULL),
-      selectInput("targetVariable", "Variable Cible pour le Déséquilibre des Classes", choices = NULL)
-    ),
-    
-    mainPanel(
-      tabsetPanel(
-        tabPanel("Résumé", verbatimTextOutput("summary")),
-        tabPanel("Graphique", plotOutput("plot")),
-        tabPanel("Tableau", tableOutput("table")),
-        tabPanel("Déséquilibre des Classes", plotOutput("classBalance"))
-      )
+ui <- dashboardPage(
+  dashboardHeader(title = "Analyse Avancée de Données"),
+  dashboardSidebar(
+    fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt")),
+    actionButton("load", "Charger les données"),
+    checkboxInput("normalize", "Normaliser les données", value = FALSE),
+    checkboxInput("dummy", "Dummifier les données", value = FALSE),
+    selectInput("targetVariable", "Variable Cible", choices = NULL)
+  ),
+  dashboardBody(
+    tabsetPanel(id = "mainTabset",
+                tabPanel("Données",
+                         fluidRow(
+                           uiOutput("dataSummaryUI")
+                         ),
+                         fluidRow(
+                           uiOutput("missingDataOptionsUI")
+                         )
+                ),
+                tabPanel("Plot", plotOutput("plot")),
+                tabPanel("Déséquilibre des Classes", plotOutput("classImbalance"))
     )
   )
 )
 
 # Server
-server <- function(input, output, session) {  # Ajoutez 'session' ici
-  data <- reactiveVal(NULL)
-  variableInfo <- reactiveVal(NULL)
+server <- function(input, output, session) {
+  
+  # Reactive values for data and missing data info
+  values <- reactiveValues(data = NULL, missingInfo = NULL)
   
   observeEvent(input$load, {
-    inFile <- input$file1
-    if (is.null(inFile)) return(NULL)
+    req(input$file1)
+    df <- read.csv(input$file1$datapath, header = TRUE, stringsAsFactors = FALSE)
     
-    ext <- tools::file_ext(inFile$datapath)
-    df <- switch(ext,
-                 csv = { read.csv(inFile$datapath) },
-                 dat = { read.table(inFile$datapath, header = TRUE) },
-                 txt = { read.delim(inFile$datapath) },
-                 stop("Type de fichier non supporté")
-    )
-    
-    if(input$dummy) {
+    if (input$dummy) {
       df <- dummifyData(df)
     }
     
-    if(input$normalize) {
-      df <- as.data.frame(lapply(df, function(column) {
-        if(is.numeric(column)) {
-          normalizeData(column)
-        } else {
-          column
-        }
-      }))
+    if (input$normalize) {
+      df <- as.data.frame(lapply(df, normalizeData))
     }
     
-    variableInfo(analyseVariables(df))
-    data(df)
-    updateSelectInput(session, "variable", choices = names(df))
+    # Store the data in a reactive value
+    values$data <- df
+    
+    # Update the select input for the target variable
     updateSelectInput(session, "targetVariable", choices = names(df))
   })
   
-  output$summary <- renderPrint({
-    if (is.null(data())) return()
-    cat("Résumé des données :\n")
-    print(summary(data()))
-    cat("\nInformations sur les Variables :\n")
-    print(variableInfo())
+  output$dataSummaryUI <- renderUI({
+    req(values$data)
+    # Logic to calculate missing data info goes here
+    # For example, count the number of NA values for each variable
+    values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
+    
+    # Create a UI output for missing data
+    tagList(
+      box(title = "Nombre de valeurs manquantes", width = 3, status = "primary", solidHeader = TRUE,
+          verbatimTextOutput("missingDataText"))
+      # Add more boxes for other summaries as needed
+    )
   })
   
-  output$plot <- renderPlot({
-    if (is.null(data()) || is.null(input$variable)) return()
-    ggplot(data(), aes_string(x = input$variable)) + 
-      geom_bar() + 
-      theme_minimal()
+  output$missingDataOptionsUI <- renderUI({
+    req(values$data)
+    # UI for missing data treatment options
+    tagList(
+      radioButtons("missingDataTreatment", "Traitement des valeurs manquantes:",
+                   choices = c("Remplacer par la moyenne" = "mean", "Supprimer" = "omit")),
+      actionButton("applyTreatment", "Appliquer le traitement")
+    )
   })
   
-  output$table <- renderTable({
-    if (is.null(data())) return()
-    head(data())
+  output$missingDataText <- renderText({
+    req(values$missingInfo)
+    paste("Valeurs manquantes par variable:\n", toString(values$missingInfo))
   })
   
-  output$classBalance <- renderPlot({
-    if (is.null(data()) || is.null(input$targetVariable)) return()
-    classDistribution <- analyseDeséquilibreClasses(data(), input$targetVariable)
-    if (!is.null(classDistribution)) {
-      barplot(classDistribution, main = "Distribution des Classes", xlab = input$targetVariable, ylab = "Nombre d'observations")
+  observeEvent(input$applyTreatment, {
+    req(values$data)
+    treatment <- input$missingDataTreatment
+    if (treatment == "mean") {
+      # Replace missing values with the mean
+      for (varName in names(values$missingInfo)) {
+        if (values$missingInfo[varName] > 0) {
+          values$data[[varName]][is.na(values$data[[varName]])] <- mean(values$data[[varName]], na.rm = TRUE)
+        }
+      }
+    } else if (treatment == "omit") {
+      # Remove rows with missing values
+      values$data <- na.omit(values$data)
     }
+    
+    # Update the missingInfo after treatment
+    values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
   })
+  
+  # Output for plot and class imbalance goes here
+  # ...
+  
 }
 
-# Lancement de l'application
-shinyApp(ui = ui, server = server)
+shinyApp(ui, server)
