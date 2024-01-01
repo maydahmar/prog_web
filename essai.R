@@ -1,5 +1,12 @@
 library(shiny)
-library(ggplot2)
+library(shinydashboard)
+library(DT)
+
+# Fonction pour calculer le mode
+Mode <- function(x) {
+  ux <- unique(na.omit(x))
+  ux[which.max(tabulate(match(x, ux)))]
+}
 
 # Fonction de normalisation
 normalizeData <- function(column) {
@@ -8,146 +15,120 @@ normalizeData <- function(column) {
 
 # Fonction de dummification
 dummifyData <- function(df) {
-  as.data.frame(lapply(df, function(column) {
-    if (is.factor(column) || is.character(column)) {
-      model.matrix(~ column - 1)[, -1]
+  df[] <- lapply(df, function(x) {
+    if (is.factor(x) || is.character(x)) {
+      model.matrix(~ x - 1)[, -1]
     } else {
-      column
+      x
     }
-  }))
-}
-
-# Fonction d'analyse des variables
-analyseVariables <- function(df) {
-  sapply(df, function(column) {
-    type <- ifelse(is.numeric(column) || is.integer(column), "Quantitative", "Qualitative")
-    categories <- ifelse(type == "Qualitative", length(unique(column)), NA)
-    
-    # Gestion des valeurs manquantes pour les calculs de quantile et d'IQR
-    if (type == "Quantitative") {
-      columnClean <- na.omit(column)
-      outliers <- sum(columnClean < quantile(columnClean, 0.25) - 1.5 * IQR(columnClean) | 
-                        columnClean > quantile(columnClean, 0.75) + 1.5 * IQR(columnClean))
-    } else {
-      outliers <- NA
-    }
-    
-    missingValues <- sum(is.na(column))
-    c(Type = type, Categories = categories, Outliers = outliers, MissingValues = missingValues)
   })
+  return(df)
 }
 
-
-# Fonction d'analyse du déséquilibre des classes
-analyseDeséquilibreClasses <- function(df, targetVariable) {
-  if (is.factor(df[[targetVariable]]) || is.character(df[[targetVariable]])) {
-    table(df[[targetVariable]])
-  } else {
-    NULL
+# Fonction pour imputer les données manquantes selon le type
+imputeData <- function(df, quantitative_method, qualitative_method) {
+  for (col_name in names(df)) {
+    if (is.numeric(df[[col_name]])) {
+      if (quantitative_method == "mean") {
+        df[[col_name]][is.na(df[[col_name]])] <- mean(df[[col_name]], na.rm = TRUE)
+      } else if (quantitative_method == "median") {
+        df[[col_name]][is.na(df[[col_name]])] <- median(df[[col_name]], na.rm = TRUE)
+      } else if (quantitative_method == "mode") {
+        df[[col_name]][is.na(df[[col_name]])] <- Mode(df[[col_name]])
+      }
+    } else {
+      if (qualitative_method == "mode") {
+        df[[col_name]][is.na(df[[col_name]])] <- Mode(df[[col_name]])
+      } else if (qualitative_method == "new_category") {
+        df[[col_name]][is.na(df[[col_name]])] <- "Inconnu"
+      }
+    }
   }
+  return(df)
 }
+
+# Fonction pour calculer et retourner les détails des valeurs manquantes
+calculateMissingDetails <- function(df) {
+  na_count <- sapply(df, function(x) sum(is.na(x)))
+  na_detail <- data.frame(
+    Variable = names(na_count),
+    MissingCount = na_count,
+    MissingPercent = (na_count / nrow(df)) * 100,
+    Type = sapply(df, function(x) {
+      if (is.numeric(x)) "Quantitative" else "Qualitative"
+    })
+  )
+  na_detail
+}
+
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
   dashboardSidebar(
     fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt")),
     actionButton("load", "Charger les données"),
-    checkboxInput("normalize", "Normaliser les données", value = FALSE),
-    checkboxInput("dummy", "Dummifier les données", value = FALSE),
-    selectInput("targetVariable", "Variable Cible", choices = NULL)
+    checkboxInput("normalize", "Normaliser les données"),
+    checkboxInput("dummy", "Dummifier les données")
   ),
   dashboardBody(
-    tabsetPanel(id = "mainTabset",
-                tabPanel("Données",
+    tabsetPanel(id = "tabs",
+                tabPanel("Données", value = "data_panel",
                          fluidRow(
-                           uiOutput("dataSummaryUI")
+                           box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
+                               collapsible = TRUE, actionButton("show_missing", "Détails")),
+                           box(title = "Variables qualitatives", status = "warning", solidHeader = TRUE, width = 4,
+                               collapsible = TRUE, actionButton("show_qualitative", "Détails")),
+                           box(title = "Outliers", status = "danger", solidHeader = TRUE, width = 4,
+                               collapsible = TRUE, actionButton("show_outliers", "Détails"))
                          ),
-                         fluidRow(
-                           uiOutput("missingDataOptionsUI")
-                         )
+                         DTOutput("missingDetailsTable"),
+                         uiOutput("data_imputation_ui")
                 ),
-                tabPanel("Plot", plotOutput("plot")),
-                tabPanel("Déséquilibre des Classes", plotOutput("classImbalance"))
+                tabPanel("Plot", value = "plot_panel", plotOutput("dataPlot")),
+                tabPanel("Déséquilibre des Classes", value = "imbalance_panel", plotOutput("classImbalancePlot"))
     )
   )
 )
 
 # Server
 server <- function(input, output, session) {
-  
-  # Reactive values for data and missing data info
-  values <- reactiveValues(data = NULL, missingInfo = NULL)
+  reactiveData <- reactiveVal(NULL)
+  reactiveMissingDetails <- reactiveVal(NULL)
   
   observeEvent(input$load, {
     req(input$file1)
-    df <- read.csv(input$file1$datapath, header = TRUE, stringsAsFactors = FALSE)
-    
-    if (input$dummy) {
-      df <- dummifyData(df)
-    }
-    
-    if (input$normalize) {
-      df <- as.data.frame(lapply(df, normalizeData))
-    }
-    
-    # Store the data in a reactive value
-    values$data <- df
-    
-    # Update the select input for the target variable
-    updateSelectInput(session, "targetVariable", choices = names(df))
+    df <- read.csv(input$file1$datapath, stringsAsFactors = FALSE)
+    if (input$normalize) df <- as.data.frame(lapply(df, normalizeData))
+    if (input$dummy) df <- dummifyData(df)
+    reactiveData(df)
+    reactiveMissingDetails(calculateMissingDetails(df))
   })
   
-  output$dataSummaryUI <- renderUI({
-    req(values$data)
-    # Logic to calculate missing data info goes here
-    # For example, count the number of NA values for each variable
-    values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
-    
-    # Create a UI output for missing data
+  output$missingDetailsTable <- renderDT({
+    req(reactiveMissingDetails())
+    reactiveMissingDetails()
+  }, options = list(pageLength = 5, searching = FALSE))
+  
+  output$data_imputation_ui <- renderUI({
     tagList(
-      box(title = "Nombre de valeurs manquantes", width = 3, status = "primary", solidHeader = TRUE,
-          verbatimTextOutput("missingDataText"))
-      # Add more boxes for other summaries as needed
+      selectInput("quantitative_method", "Méthode pour les variables quantitatives:", 
+                  choices = c("Moyenne" = "mean", "Médiane" = "median", "Mode" = "mode")),
+      selectInput("qualitative_method", "Méthode pour les variables qualitatives:", 
+                  choices = c("Mode" = "mode", "Nouvelle Catégorie" = "new_category")),
+      actionButton("apply_mv_treatment", "Appliquer")
     )
   })
   
-  output$missingDataOptionsUI <- renderUI({
-    req(values$data)
-    # UI for missing data treatment options
-    tagList(
-      radioButtons("missingDataTreatment", "Traitement des valeurs manquantes:",
-                   choices = c("Remplacer par la moyenne" = "mean", "Supprimer" = "omit")),
-      actionButton("applyTreatment", "Appliquer le traitement")
-    )
+  observeEvent(input$apply_mv_treatment, {
+    req(reactiveData(), input$quantitative_method, input$qualitative_method)
+    df <- reactiveData()
+    df <- imputeData(df, input$quantitative_method, input$qualitative_method)
+    reactiveData(df) # Mettre à jour les données traitées
+    reactiveMissingDetails(calculateMissingDetails(df))
   })
   
-  output$missingDataText <- renderText({
-    req(values$missingInfo)
-    paste("Valeurs manquantes par variable:\n", toString(values$missingInfo))
-  })
-  
-  observeEvent(input$applyTreatment, {
-    req(values$data)
-    treatment <- input$missingDataTreatment
-    if (treatment == "mean") {
-      # Replace missing values with the mean
-      for (varName in names(values$missingInfo)) {
-        if (values$missingInfo[varName] > 0) {
-          values$data[[varName]][is.na(values$data[[varName]])] <- mean(values$data[[varName]], na.rm = TRUE)
-        }
-      }
-    } else if (treatment == "omit") {
-      # Remove rows with missing values
-      values$data <- na.omit(values$data)
-    }
-    
-    # Update the missingInfo after treatment
-    values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
-  })
-  
-  # Output for plot and class imbalance goes here
+  # Outputs pour les plots et le déséquilibre des classes
   # ...
-  
 }
 
 shinyApp(ui, server)
