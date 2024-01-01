@@ -1,5 +1,5 @@
 library(shiny)
-library(ggplot2)
+library(shinydashboard)
 
 # Fonction de normalisation
 normalizeData <- function(column) {
@@ -37,7 +37,6 @@ analyseVariables <- function(df) {
   })
 }
 
-
 # Fonction d'analyse du déséquilibre des classes
 analyseDeséquilibreClasses <- function(df, targetVariable) {
   if (is.factor(df[[targetVariable]]) || is.character(df[[targetVariable]])) {
@@ -46,6 +45,13 @@ analyseDeséquilibreClasses <- function(df, targetVariable) {
     NULL
   }
 }
+
+#Fonction pour calculer le mode
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
@@ -74,7 +80,6 @@ ui <- dashboardPage(
 
 # Server
 server <- function(input, output, session) {
-  
   # Reactive values for data and missing data info
   values <- reactiveValues(data = NULL, missingInfo = NULL)
   
@@ -99,16 +104,64 @@ server <- function(input, output, session) {
   
   output$dataSummaryUI <- renderUI({
     req(values$data)
-    # Logic to calculate missing data info goes here
-    # For example, count the number of NA values for each variable
-    values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
     
-    # Create a UI output for missing data
+    # Séparation des variables quantitatives et qualitatives
+    quant_vars <- Filter(is.numeric, values$data)
+    qual_vars <- Filter(is.character, values$data)
+    
+    # Affichage des résumés pour les variables quantitatives
+    quant_summary <- lapply(names(quant_vars), function(var) {
+      first_few <- head(values$data[[var]], 3)
+      list(QuantitativeVariable = var, FirstFewValues = first_few)
+    })
+    
+    # Affichage des résumés pour les variables qualitatives
+    qual_summary <- lapply(names(qual_vars), function(var) {
+      first_few <- head(values$data[[var]], 3)
+      list(QualitativeVariable = var, FirstFewValues = first_few)
+    })
+    
+    # Affichage des valeurs manquantes
+    missing_info <- sapply(values$data, function(x) sum(is.na(x)))
+    missing_data_summary <- paste("Valeurs manquantes par variable:\n", toString(missing_info))
+    
+    # Création de l'UI output pour les résumés
     tagList(
-      box(title = "Nombre de valeurs manquantes", width = 3, status = "primary", solidHeader = TRUE,
+      box(title = "Variables Quantitatives", width = 6, status = "primary", solidHeader = TRUE,
+          verbatimTextOutput("quantitativeSummaryText")),
+      box(title = "Variables Qualitatives", width = 6, status = "primary", solidHeader = TRUE,
+          verbatimTextOutput("qualitativeSummaryText")),
+      box(title = "Valeurs manquantes", width = 12, status = "primary", solidHeader = TRUE,
           verbatimTextOutput("missingDataText"))
-      # Add more boxes for other summaries as needed
     )
+  })
+  
+  output$quantitativeSummaryText <- renderText({
+    req(values$data)
+    quant_vars <- Filter(is.numeric, values$data)
+    # Affichage des résumés pour les variables quantitatives
+    quant_summary <- lapply(names(quant_vars), function(var) {
+      first_few <- head(values$data[[var]], 3)
+      paste("Variable:", var, "\n", "Premières valeurs:", toString(first_few), "\n\n")
+    })
+    paste(quant_summary, collapse = "\n")
+  })
+  
+  output$qualitativeSummaryText <- renderText({
+    req(values$data)
+    qual_vars <- Filter(is.character, values$data)
+    # Affichage des résumés pour les variables qualitatives
+    qual_summary <- lapply(names(qual_vars), function(var) {
+      first_few <- head(values$data[[var]], 3)
+      paste("Variable:", var, "\n", "Premières valeurs:", toString(first_few), "\n\n")
+    })
+    paste(qual_summary, collapse = "\n")
+  })  
+  
+  output$missingDataText <- renderText({
+    req(values$data)
+    missing_info <- sapply(values$data, function(x) sum(is.na(x)))
+    paste("Valeurs manquantes par variable:\n", toString(missing_info))
   })
   
   output$missingDataOptionsUI <- renderUI({
@@ -121,33 +174,29 @@ server <- function(input, output, session) {
     )
   })
   
-  output$missingDataText <- renderText({
-    req(values$missingInfo)
-    paste("Valeurs manquantes par variable:\n", toString(values$missingInfo))
-  })
-  
   observeEvent(input$applyTreatment, {
     req(values$data)
     treatment <- input$missingDataTreatment
-    if (treatment == "mean") {
-      # Replace missing values with the mean
-      for (varName in names(values$missingInfo)) {
-        if (values$missingInfo[varName] > 0) {
+    for (varName in names(values$missingInfo)) {
+      if (values$missingInfo[varName] > 0 && treatment == "mean") {
+        if (is.numeric(values$data[[varName]])) {
+          # Replace missing values with the mean for numeric variables
           values$data[[varName]][is.na(values$data[[varName]])] <- mean(values$data[[varName]], na.rm = TRUE)
+          cat('tot1')
+        } else if (is.character(values$data[[varName]])) {
+          # Replace missing values with the mode for character variables
+          values$data[[varName]][is.na(values$data[[varName]])] <- Mode(values$data[[varName]])
+          cat('toto2')
         }
       }
-    } else if (treatment == "omit") {
-      # Remove rows with missing values
-      values$data <- na.omit(values$data)
     }
     
     # Update the missingInfo after treatment
     values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
+    
   })
   
-  # Output for plot and class imbalance goes here
-  # ...
-  
+
 }
 
 shinyApp(ui, server)
