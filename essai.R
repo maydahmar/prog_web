@@ -216,24 +216,30 @@ server <- function(input, output, session) {
   
   
   # Mettre à jour le tableau des détails des valeurs manquantes dynamiquement
-  output$missingDetailsTable <- renderDT({
+  # Observateur pour afficher les détails des valeurs manquantes
+  observeEvent(input$show_missing, {
     req(dataProcessed())
     df_details <- calculateMissingDetails(dataProcessed())
-    datatable(df_details, options = list(pageLength = 5, autoWidth = TRUE, searching = FALSE))
-  })
-  
-  # UI pour les méthodes d'imputation, affichée dynamiquement
-  output$data_imputation_ui <- renderUI({
-    if (input$show_missing || input$show_qualitative) {
+    
+    # Définir le contenu UI pour le tableau et les options de traitement
+    output$dynamicTableUI <- renderUI({
       tagList(
+        DTOutput("missingDetailsTable"), # Affiche d'abord le tableau
+        hr(), # Ajouter une séparation visuelle
         selectInput("quantitative_method", "Méthode pour les variables quantitatives:", 
                     choices = c("Moyenne" = "mean", "Médiane" = "median", "Mode" = "mode")),
         selectInput("qualitative_method", "Méthode pour les variables qualitatives:", 
                     choices = c("Mode" = "mode", "Nouvelle Catégorie" = "new_category")),
         actionButton("apply_mv_treatment", "Appliquer")
       )
-    }
+    })
+    
+    # Configurer l'affichage du tableau des valeurs manquantes
+    output$missingDetailsTable <- renderDT({
+      df_details
+    }, options = list(pageLength = 5, searching = FALSE))
   })
+
   
   # Appliquer les méthodes d'imputation lorsque demandé
   observeEvent(input$apply_mv_treatment, {
