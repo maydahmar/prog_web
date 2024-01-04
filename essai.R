@@ -199,7 +199,7 @@ server <- function(input, output, session) {
     }
   }, options = list(pageLength = 5, searching = FALSE))
   
-
+  
   
   output$dynamicTableUI <- renderUI({
     if(currentView() == "missing") {
@@ -208,7 +208,7 @@ server <- function(input, output, session) {
       DTOutput("outliersTable")
     }
   })
- 
+  
   
   
   
@@ -244,7 +244,7 @@ server <- function(input, output, session) {
     output$missingDetailsTable <- renderDT(calculateMissingDetails(df), options = list(pageLength = 5, searching = FALSE))
   })
   
-
+  
 }
 
 shinyApp(ui, server)
