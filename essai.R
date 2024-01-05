@@ -116,12 +116,13 @@ ui <- dashboardPage(
     tabsetPanel(id = "tabs",
                 tabPanel("Données", value = "data_panel",
                          fluidRow(
-                           box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
-                               collapsible = TRUE, actionButton("show_missing", "Détails")),
-                           box(title = "Variables qualitatives", status = "warning", solidHeader = TRUE, width = 4,
-                               collapsible = TRUE, actionButton("show_qualitative", "Détails")),
                            box(title = "Outliers", status = "danger", solidHeader = TRUE, width = 4,
                                collapsible = TRUE, actionButton("show_outliers", "Détails")),
+                           box(title = "Variables qualitatives", status = "warning", solidHeader = TRUE, width = 4,
+                               collapsible = TRUE, actionButton("show_qualitative", "Détails")),
+          
+                           box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
+                               collapsible = TRUE, actionButton("show_missing", "Détails"))
                            
                          ),
                          uiOutput("dynamicTableUI") 
@@ -151,7 +152,6 @@ server <- function(input, output, session) {
     dataOriginal(df)
     dataProcessed(df)
   })
-  
   # Appliquer ou annuler la normalisation et la dummification
   observe({
     req(dataOriginal())
@@ -168,11 +168,13 @@ server <- function(input, output, session) {
     dataProcessed(df)
   })
   
+  
   # Utilisez une valeur réactive pour contrôler quel tableau est affiché
   currentView <- reactiveVal(NULL)
   
   observeEvent(input$show_missing, {
     currentView("missing")
+    
   })
   
   observeEvent(input$show_qualitative, {
@@ -181,7 +183,18 @@ server <- function(input, output, session) {
   
   observeEvent(input$show_outliers, {
     currentView("outliers")
+    
   })
+  
+  
+  output$dynamicTableUI <- renderUI({
+    if(currentView() == "missing") {
+      DTOutput("missingDetailsTable")
+    } else if(currentView() == "outliers") {
+      DTOutput("outliersTable")
+    }
+  })
+  
   
   # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
   output$missingDetailsTable <- renderDT({
@@ -190,6 +203,8 @@ server <- function(input, output, session) {
       calculateMissingDetails(dataProcessed())
     }
   }, options = list(pageLength = 5, searching = FALSE))
+  
+  
   
   # Générer le tableau des outliers uniquement lorsque l'utilisateur clique sur "Détails" sous "Outliers"
   output$outliersTable <- renderDT({
@@ -201,13 +216,7 @@ server <- function(input, output, session) {
   
   
   
-  output$dynamicTableUI <- renderUI({
-    if(currentView() == "missing") {
-      DTOutput("missingDetailsTable")
-    } else if(currentView() == "outliers") {
-      DTOutput("outliersTable")
-    }
-  })
+ 
   
   
   
@@ -249,6 +258,9 @@ server <- function(input, output, session) {
     # Si vous souhaitez mettre à jour le tableau des détails des valeurs manquantes après l'imputation
     output$missingDetailsTable <- renderDT(calculateMissingDetails(df), options = list(pageLength = 5, searching = FALSE))
   })
+  
+  
+
   
   
 }
