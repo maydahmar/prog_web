@@ -1,5 +1,8 @@
 library(shiny)
 library(shinydashboard)
+library(FactoMineR)
+library(factoextra)
+library(rpart)
 
 # Fonction de normalisation
 normalizeData <- function(column) {
@@ -17,63 +20,49 @@ dummifyData <- function(df) {
   }))
 }
 
-# Fonction d'analyse des variables
-analyseVariables <- function(df) {
-  sapply(df, function(column) {
-    type <- ifelse(is.numeric(column) || is.integer(column), "Quantitative", "Qualitative")
-    categories <- ifelse(type == "Qualitative", length(unique(column)), NA)
-    
-    # Gestion des valeurs manquantes pour les calculs de quantile et d'IQR
-    if (type == "Quantitative") {
-      columnClean <- na.omit(column)
-      outliers <- sum(columnClean < quantile(columnClean, 0.25) - 1.5 * IQR(columnClean) | 
-                        columnClean > quantile(columnClean, 0.75) + 1.5 * IQR(columnClean))
-    } else {
-      outliers <- NA
-    }
-    
-    missingValues <- sum(is.na(column))
-    c(Type = type, Categories = categories, Outliers = outliers, MissingValues = missingValues)
-  })
-}
-
-# Fonction d'analyse du déséquilibre des classes
-analyseDeséquilibreClasses <- function(df, targetVariable) {
-  if (is.factor(df[[targetVariable]]) || is.character(df[[targetVariable]])) {
-    table(df[[targetVariable]])
-  } else {
-    NULL
-  }
-}
-
-#Fonction pour calculer le mode
-Mode <- function(x) {
-  ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
-}
-
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
   dashboardSidebar(
-    fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt")),
+    fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt",".data")),
     actionButton("load", "Charger les données"),
     checkboxInput("normalize", "Normaliser les données", value = FALSE),
     checkboxInput("dummy", "Dummifier les données", value = FALSE),
     selectInput("targetVariable", "Variable Cible", choices = NULL)
   ),
   dashboardBody(
-    tabsetPanel(id = "mainTabset",
-                tabPanel("Données",
-                         fluidRow(
-                           uiOutput("dataSummaryUI")
-                         ),
-                         fluidRow(
-                           uiOutput("missingDataOptionsUI")
-                         )
-                ),
-                tabPanel("Plot", plotOutput("plot")),
-                tabPanel("Déséquilibre des Classes", plotOutput("classImbalance"))
+    tabsetPanel(
+      id = "mainTabset",
+      tabPanel("Données",
+               fluidRow(
+                 uiOutput("dataSummaryUI")
+               ),
+               fluidRow(
+                 uiOutput("missingDataOptionsUI")
+               )
+      ),
+      tabPanel("Plot", plotOutput("plot")),
+      tabPanel("Déséquilibre des Classes", plotOutput("classImbalance")),
+      tabPanel("ACP Visualisation",
+               radioButtons("visualizationType", "Correlation entre les :",
+                            choices = c("Individus" = "ind", "Variables" = "var"), selected = "VAR"),
+               sliderInput("numObservations", "Nombre d'observations à inclure dans l'ACP:",
+                           min = 1, max = 3750, value = 100, step = 1),
+               plotOutput("visualisationPlot")
+      ),
+      tabPanel("Modèles de Classification",
+               fluidRow(
+                 box(title = "Entraînement des Modèles",
+                     selectInput("selectedModel", "Choisir le Modèle",
+                                 choices = c("Régression Logistique" = "lm", "Arbre de Décision" = "rpart")),
+                     actionButton("trainModels", "Entraîner le Modèle")
+                 ),
+                 box(title = "Évaluation Comparative",
+                     plotOutput("modelComparisonPlot")),
+                 box(title = "Résultats",
+                     verbatimTextOutput("modelResultsText"))
+               )
+      )
     )
   )
 )
@@ -81,10 +70,11 @@ ui <- dashboardPage(
 # Server
 server <- function(input, output, session) {
   # Reactive values for data and missing data info
-  values <- reactiveValues(data = NULL, missingInfo = NULL)
+  values <- reactiveValues(data = NULL, missingInfo = NULL, acp_result = NULL, afcm_result = NULL)
   
   observeEvent(input$load, {
     req(input$file1)
+    
     df <- read.csv(input$file1$datapath, header = TRUE, stringsAsFactors = FALSE)
     
     if (input$dummy) {
@@ -100,6 +90,28 @@ server <- function(input, output, session) {
     
     # Update the select input for the target variable
     updateSelectInput(session, "targetVariable", choices = names(df))
+    
+    # Identifier les variables numériques
+    values$numeric_vars <- sapply(df, function(column) is.numeric(column))
+    
+    # Extraire les colonnes des variables numériques
+    values$df_numeric <- df[values$numeric_vars]
+    
+    
+    # Calcul de l'ACP
+    values$acp_result <- PCA(values$df_numeric, graph = FALSE)
+    
+    # Conversion des variables qualitatives en variables factices pour l'AFDM
+    #df_afcm <- dummifyData(df)
+    
+    # Identifier les variables catégorielles
+    values$categorical_vars <- sapply(df, function(column) is.character(column) || is.factor(column))
+    
+    # Extraire les colonnes des variables catégorielles
+    values$df_categ <- df[values$categorical_vars]
+    
+    # Calcul de l'AFDM
+    values$afcm_result <- MCA(values$df_categ, graph = FALSE)
   })
   
   output$dataSummaryUI <- renderUI({
@@ -156,7 +168,7 @@ server <- function(input, output, session) {
       paste("Variable:", var, "\n", "Premières valeurs:", toString(first_few), "\n\n")
     })
     paste(qual_summary, collapse = "\n")
-  })  
+  })
   
   output$missingDataText <- renderText({
     req(values$data)
@@ -193,10 +205,80 @@ server <- function(input, output, session) {
     
     # Update the missingInfo after treatment
     values$missingInfo <- sapply(values$data, function(x) sum(is.na(x)))
-    
   })
   
-
+  output$visualisationPlot <- renderPlot({
+    req(values$data, input$visualizationType)
+    
+    if (input$visualizationType == "var") {
+      # Sélection des premières observations en fonction du slider
+      df_subset <- values$df_numeric[1:input$numObservations, ]
+      
+      # Calcul de l'ACP
+      acp_result <- PCA(df_subset, graph = FALSE)
+      
+      # Affichage du cercle des corrélations pour l'ACP sur les deux premières dimensions
+      fviz_pca_var(acp_result, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+                   repel = TRUE, title = "ACP - Variables")
+    } else if (input$visualizationType == "ind") {
+      # Sélection des premières observations en fonction du slider
+      df_subset <- values$df_numeric[1:input$numObservations, ]
+      
+      # Calcul de l'ACP
+      acp_result <- PCA(df_subset, graph = FALSE)
+      
+      # Affichage du cercle des corrélations pour l'ACP sur les deux premières dimensions
+      fviz_pca_ind(acp_result, col.ind = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+                   repel = TRUE, title = "ACP - Individus")
+    }
+  })
+  
+  # Reactive values for training models
+  trained_model <- reactiveValues()
+  
+  observeEvent(input$trainModels, {
+    req(input$file1, input$targetVariable, input$selectedModel)
+    
+    # Séparer les données en variables explicatives (X) et variable cible (Y)
+    X_train <- values$df_numeric[, -which(names(values$df_numeric) == input$targetVariable, arr.ind = TRUE)]
+    Y_train <- values$df_numeric[, input$targetVariable]
+    
+    print(Y_train)
+    
+    # Entraîner le modèle sélectionné
+    if (input$selectedModel == "lm") {
+      model <- lm(Y_train ~ ., data = values$df_numeric)
+    } else if (input$selectedModel == "rpart") {
+      model <- rpart(Y_train ~ ., data = values$df_numeric, method = "anova")
+    }
+    
+    
+    # Stocker le modèle entraîné dans reactiveValues
+    trained_model$model <- model
+  })
+  
+  # Comparaison des modèles
+  output$modelComparisonPlot <- renderPlot({
+    req(trained_model$model)
+    
+    # Ajoutez votre logique pour la comparaison des modèles ici
+    # Vous pouvez utiliser des métriques comme la précision, le rappel, le F-score, ROC, AUC, etc.
+    # Exemple simplifié:
+    results <- confusionMatrix(predict(trained_model$model, newdata = X_train, type = "response"), Y_train)
+    plot(results)
+  })
+  
+  # Afficher les résultats
+  output$modelResultsText <- renderText({
+    req(trained_model$model)
+    
+    # Ajoutez votre logique pour afficher les résultats ici
+    # Vous pouvez extraire les performances du modèle et afficher les métriques souhaitées
+    # Exemple simplifié:
+    results <- confusionMatrix(predict(trained_model$model, newdata = X_train, type = "response"), Y_train)
+    paste("Résultats de l'Entraînement du Modèle:\n", results)
+  })
 }
+
 
 shinyApp(ui, server)
