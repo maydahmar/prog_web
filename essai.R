@@ -116,19 +116,24 @@ ui <- dashboardPage(
     tabsetPanel(id = "tabs",
                 tabPanel("Données", value = "data_panel",
                          fluidRow(
+                           
+                           box(title = "Dataset", status = "warning", solidHeader = TRUE, width = 4,
+                               collapsible = TRUE, actionButton("show_data", "Afficher")),
+                           
                            box(title = "Outliers", status = "danger", solidHeader = TRUE, width = 4,
                                collapsible = TRUE, actionButton("show_outliers", "Détails")),
-                           box(title = "Variables qualitatives", status = "warning", solidHeader = TRUE, width = 4,
-                               collapsible = TRUE, actionButton("show_qualitative", "Détails")),
           
                            box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
                                collapsible = TRUE, actionButton("show_missing", "Détails"))
                            
+
                          ),
                          uiOutput("dynamicTableUI") 
                 ),
                 tabPanel("Plot", value = "plot_panel", plotOutput("dataPlot")),
-                tabPanel("Déséquilibre des Classes", value = "imbalance_panel", plotOutput("classImbalancePlot"))
+                tabPanel("Déséquilibre des Classes",
+                         DTOutput("tableVariableTypes")
+                )
     )
   )
 )
@@ -136,16 +141,18 @@ ui <- dashboardPage(
 server <- function(input, output, session) {
   dataOriginal <- reactiveVal(NULL)
   dataProcessed <- reactiveVal(NULL)
+  reactiveOutliers <- reactiveVal(NULL)
   
   observeEvent(input$load, {
     inFile <- input$file1
-    if (is.null(inFile)) return(NULL)
+    if (is.null(inFile)) {return(NULL)}
     
     ext <- tools::file_ext(inFile$datapath)
     df <- switch(ext,
                  csv = { read.csv(inFile$datapath) },
                  dat = { read.table(inFile$datapath, header = TRUE) },
                  txt = { read.delim(inFile$datapath) },
+                 data = read.table(inFile$datapath, header = TRUE, sep = ","),
                  stop("Type de fichier non supporté")
     )
     
@@ -165,6 +172,9 @@ server <- function(input, output, session) {
       df <- dummifyData(df)
     }
     
+    
+    
+    
     dataProcessed(df)
   })
   
@@ -177,9 +187,12 @@ server <- function(input, output, session) {
     
   })
   
-  observeEvent(input$show_qualitative, {
-    currentView("qualitative")
+  # Observateur pour le bouton d'affichage des données
+  observeEvent(input$show_data, {
+    # Utiliser la valeur réactive pour afficher les données
+    currentView("data")
   })
+  
   
   observeEvent(input$show_outliers, {
     currentView("outliers")
@@ -191,12 +204,28 @@ server <- function(input, output, session) {
     if(currentView() == "missing") {
       DTOutput("missingDetailsTable")
     } else if(currentView() == "outliers") {
-      DTOutput("outliersTable")
+      {
+        tagList(
+          DTOutput("outliersTable"),
+          hr(),
+          selectInput("outlier_action", "Action on outliers:", choices = c("None", "Remove")),
+          actionButton("apply_outlier_action", "Apply Action")
+        )
+      } 
+    }
+    else if(currentView() == "data") {
+      DTOutput("dataTable")
     }
   })
   
   
-  # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
+  # Affichage des données
+  output$dataTable <- renderDT({
+    req(dataProcessed())
+    dataProcessed()
+  }, options = list(pageLength = 10, autoWidth = TRUE))
+ 
+   # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
   output$missingDetailsTable <- renderDT({
     if(currentView() == "missing") {
       req(dataProcessed())
@@ -229,7 +258,8 @@ server <- function(input, output, session) {
   observeEvent(input$show_missing, {
     req(dataProcessed())
     df_details <- calculateMissingDetails(dataProcessed())
-    
+   
+     
     # Définir le contenu UI pour le tableau et les options de traitement
     output$dynamicTableUI <- renderUI({
       tagList(
@@ -261,6 +291,66 @@ server <- function(input, output, session) {
   
   
 
+  
+  
+  # Pour stocker les noms des variables catégorielles et numériques
+  varTypes <- reactiveVal(list(categorical = character(), numerical = character()))
+  
+  # Lorsque les données sont chargées ou mises à jour
+  observeEvent(dataProcessed(), {
+    df <- dataProcessed()
+    # Détecter les types de variables
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    # Stocker les types de variables dans une réactive value
+    varTypes(list(categorical = cat_vars, numerical = num_vars))
+  })
+  
+  # Générer le tableau pour l'affichage des types de variables
+  output$tableVariableTypes <- renderDT({
+    var_types <- varTypes()
+    # Trouver la longueur maximale
+    max_length <- max(length(var_types$categorical), length(var_types$numerical))
+    
+    # Étendre les deux listes à la longueur maximale
+    categorical_vars <- c(var_types$categorical, rep(NA, max_length - length(var_types$categorical)))
+    numerical_vars <- c(var_types$numerical, rep(NA, max_length - length(var_types$numerical)))
+    
+    # Créer un data frame pour l'affichage
+    data.frame(
+      Categorical = categorical_vars,
+      Numerical = numerical_vars,
+      stringsAsFactors = FALSE
+    )
+  }, options = list(pageLength = 5, searching = TRUE))
+  
+  
+ 
+  # Action to remove outliers
+  observeEvent(input$apply_outlier_action, {
+    req(input$outlier_action == "Remove")  # Ensure "Remove" is selected
+    df <- dataProcessed()                   # Get the current data
+    #outliers <- reactiveOutliers()          # Get the current outliers
+    outliers_df <- detectOutliers(df)  
+    
+    if (nrow(outliers_df) > 0) {
+      # Loop through all variables and remove outliers
+      for (var in unique(outliers_df$Variable)) {
+        outlier_values <- outliers_df$OutlierValue[outliers_df$Variable == var]
+        df <- df[!df[[var]] %in% outlier_values, ]
+      }
+      dataProcessed(df)  # Update the processed data without outliers
+      reactiveOutliers(NULL)  # Reset the reactive value for outliers
+    }
+    
+    # Update the table to reflect the changes
+    output$outliersTable <- renderDT({
+      detectOutliers(dataProcessed())
+    }, options = list(pageLength = 5, autoWidth = TRUE))
+  })
+  
+  
   
   
 }
