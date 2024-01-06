@@ -1,6 +1,5 @@
 library(shiny)
 library(shinydashboard)
-<<<<<<< HEAD
 library(DT)
 
 # Fonction pour calculer le mode
@@ -8,11 +7,6 @@ Mode <- function(x) {
   ux <- unique(na.omit(x))
   ux[which.max(tabulate(match(x, ux)))]
 }
-=======
-  library(FactoMineR)
-library(factoextra)
-library(rpart)
->>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
 
 # Fonction de normalisation
 normalizeData <- function(df) {
@@ -34,7 +28,6 @@ dummifyData <- function(df) {
     } else {
       x
     }
-    <<<<<<< HEAD
   })
   return(df)
 }
@@ -108,26 +101,18 @@ detectOutliers <- function(df) {
     }
   }
   return(outliers_df)
-  =======
-}))
->>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
 }
 
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
   dashboardSidebar(
-    <<<<<<< HEAD
     fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt", ".data", ".xls", ".xlsx" )),
-    =======
-      fileInput("file1", "Choisir un fichier", accept = c(".csv", ".dat", ".txt",".data")),
-    >>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
     actionButton("load", "Charger les données"),
     checkboxInput("normalize", "Normaliser les données"),
     checkboxInput("dummy", "Dummifier les données")
   ),
   dashboardBody(
-    <<<<<<< HEAD
     tabsetPanel(id = "tabs",
                 tabPanel("Données", value = "data_panel",
                          fluidRow(
@@ -149,464 +134,225 @@ ui <- dashboardPage(
                 tabPanel("Déséquilibre des Classes",
                          DTOutput("tableVariableTypes")
                 )
-                =======
-                  tabsetPanel(
-                    id = "mainTabset",
-                    tabPanel("Données",
-                             fluidRow(
-                               uiOutput("dataSummaryUI")
-                             ),
-                             fluidRow(
-                               uiOutput("missingDataOptionsUI")
-                             )
-                    ),
-                    tabPanel("Plot", plotOutput("plot")),
-                    tabPanel("Déséquilibre des Classes", plotOutput("classImbalance")),
-                    tabPanel("ACP Visualisation",
-                             radioButtons("visualizationType", "Correlation entre les :",
-                                          choices = c("Individus" = "ind", "Variables" = "var"), selected = "VAR"),
-                             sliderInput("numObservations", "Nombre d'observations à inclure dans l'ACP:",
-                                         min = 1, max = 3750, value = 100, step = 1),
-                             plotOutput("visualisationPlot")
-                    ),
-                    tabPanel("Modèles de Classification",
-                             fluidRow(
-                               box(title = "Entraînement des Modèles",
-                                   selectInput("selectedModel", "Choisir le Modèle",
-                                               choices = c("Régression Logistique" = "lm", "Arbre de Décision" = "rpart")),
-                                   actionButton("trainModels", "Entraîner le Modèle")
-                               ),
-                               box(title = "Évaluation Comparative",
-                                   plotOutput("modelComparisonPlot")),
-                               box(title = "Résultats",
-                                   verbatimTextOutput("modelResultsText"))
-                             )
-                    )
-                    >>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
-                  )
     )
   )
-  # Server
-  server <- function(input, output, session) {
-    <<<<<<< HEAD
-    dataOriginal <- reactiveVal(NULL)
-    dataProcessed <- reactiveVal(NULL)
-    reactiveOutliers <- reactiveVal(NULL)
+)
+# Server
+server <- function(input, output, session) {
+  dataOriginal <- reactiveVal(NULL)
+  dataProcessed <- reactiveVal(NULL)
+  reactiveOutliers <- reactiveVal(NULL)
+  
+  observeEvent(input$load, {
+    inFile <- input$file1
+    if (is.null(inFile)) {return(NULL)}
     
-    observeEvent(input$load, {
-      inFile <- input$file1
-      if (is.null(inFile)) {return(NULL)}
-      
-      ext <- tools::file_ext(inFile$datapath)
-      df <- switch(ext,
-                   csv = { read.csv(inFile$datapath) },
-                   dat = { read.table(inFile$datapath, header = TRUE) },
-                   txt = { read.delim(inFile$datapath) },
-                   data = read.table(inFile$datapath, header = TRUE, sep = ","),
-                   stop("Type de fichier non supporté")
+    ext <- tools::file_ext(inFile$datapath)
+    df <- switch(ext,
+                 csv = { read.csv(inFile$datapath) },
+                 dat = { read.table(inFile$datapath, header = TRUE) },
+                 txt = { read.delim(inFile$datapath) },
+                 data = read.table(inFile$datapath, header = TRUE, sep = ","),
+                 stop("Type de fichier non supporté")
+    )
+    
+    dataOriginal(df)
+    dataProcessed(df)
+  })
+  # Appliquer ou annuler la normalisation et la dummification
+  observe({
+    req(dataOriginal())
+    df <- dataOriginal()
+    
+    if (input$normalize) {
+      df <- normalizeData(df)
+    }
+    
+    if (input$dummy) {
+      df <- dummifyData(df)
+    }
+    
+    
+    
+    
+    dataProcessed(df)
+  })
+  
+  
+  # Utilisez une valeur réactive pour contrôler quel tableau est affiché
+  currentView <- reactiveVal(NULL)
+  
+  observeEvent(input$show_missing, {
+    currentView("missing")
+    
+  })
+  
+  # Observateur pour le bouton d'affichage des données
+  observeEvent(input$show_data, {
+    # Utiliser la valeur réactive pour afficher les données
+    currentView("data")
+  })
+  
+  
+  observeEvent(input$show_outliers, {
+    currentView("outliers")
+    
+  })
+  
+  
+  output$dynamicTableUI <- renderUI({
+    if(currentView() == "missing") {
+      DTOutput("missingDetailsTable")
+    } else if(currentView() == "outliers") {
+      {
+        tagList(
+          DTOutput("outliersTable"),
+          hr(),
+          selectInput("outlier_action", "Action on outliers:", choices = c("None", "Remove")),
+          actionButton("apply_outlier_action", "Apply Action")
+        )
+      } 
+    }
+    else if(currentView() == "data") {
+      DTOutput("dataTable")
+    }
+  })
+  
+  
+  # Affichage des données
+  output$dataTable <- renderDT({
+    req(dataProcessed())
+    dataProcessed()
+  }, options = list(pageLength = 10, autoWidth = TRUE))
+  
+  # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
+  output$missingDetailsTable <- renderDT({
+    if(currentView() == "missing") {
+      req(dataProcessed())
+      calculateMissingDetails(dataProcessed())
+    }
+  }, options = list(pageLength = 5, searching = FALSE))
+  
+  
+  
+  # Générer le tableau des outliers uniquement lorsque l'utilisateur clique sur "Détails" sous "Outliers"
+  output$outliersTable <- renderDT({
+    if(currentView() == "outliers") {
+      req(dataProcessed())
+      detectOutliers(dataProcessed())
+    }
+  }, options = list(pageLength = 5, searching = FALSE))
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # Mettre à jour le tableau des détails des valeurs manquantes dynamiquement
+  # Observateur pour afficher les détails des valeurs manquantes
+  observeEvent(input$show_missing, {
+    req(dataProcessed())
+    df_details <- calculateMissingDetails(dataProcessed())
+    
+    
+    # Définir le contenu UI pour le tableau et les options de traitement
+    output$dynamicTableUI <- renderUI({
+      tagList(
+        DTOutput("missingDetailsTable"), # Affiche d'abord le tableau
+        hr(), # Ajouter une séparation visuelle
+        selectInput("quantitative_method", "Méthode pour les variables quantitatives:", 
+                    choices = c("Moyenne" = "mean", "Médiane" = "median", "Mode" = "mode")),
+        selectInput("qualitative_method", "Méthode pour les variables qualitatives:", 
+                    choices = c("Mode" = "mode", "Nouvelle Catégorie" = "new_category")),
+        actionButton("apply_mv_treatment", "Appliquer")
       )
-      
-      dataOriginal(df)
-      dataProcessed(df)
     })
-    # Appliquer ou annuler la normalisation et la dummification
-    observe({
-      req(dataOriginal())
-      df <- dataOriginal()
-      
-      if (input$normalize) {
-        df <- normalizeData(df)
+    
+    # Configurer l'affichage du tableau des valeurs manquantes
+    output$missingDetailsTable <- renderDT({
+      df_details
+    }, options = list(pageLength = 5, searching = FALSE))
+  })
+  
+  
+  # Appliquer les méthodes d'imputation lorsque demandé
+  observeEvent(input$apply_mv_treatment, {
+    req(dataProcessed(), input$quantitative_method, input$qualitative_method)
+    df <- imputeData(dataProcessed(), input$quantitative_method, input$qualitative_method)
+    dataProcessed(df) # Mettre à jour les données traitées
+    # Si vous souhaitez mettre à jour le tableau des détails des valeurs manquantes après l'imputation
+    output$missingDetailsTable <- renderDT(calculateMissingDetails(df), options = list(pageLength = 5, searching = FALSE))
+  })
+  
+  
+  
+  
+  
+  # Pour stocker les noms des variables catégorielles et numériques
+  varTypes <- reactiveVal(list(categorical = character(), numerical = character()))
+  
+  # Lorsque les données sont chargées ou mises à jour
+  observeEvent(dataProcessed(), {
+    df <- dataProcessed()
+    # Détecter les types de variables
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    # Stocker les types de variables dans une réactive value
+    varTypes(list(categorical = cat_vars, numerical = num_vars))
+  })
+  
+  # Générer le tableau pour l'affichage des types de variables
+  output$tableVariableTypes <- renderDT({
+    var_types <- varTypes()
+    # Trouver la longueur maximale
+    max_length <- max(length(var_types$categorical), length(var_types$numerical))
+    
+    # Étendre les deux listes à la longueur maximale
+    categorical_vars <- c(var_types$categorical, rep(NA, max_length - length(var_types$categorical)))
+    numerical_vars <- c(var_types$numerical, rep(NA, max_length - length(var_types$numerical)))
+    
+    # Créer un data frame pour l'affichage
+    data.frame(
+      Categorical = categorical_vars,
+      Numerical = numerical_vars,
+      stringsAsFactors = FALSE
+    )
+  }, options = list(pageLength = 5, searching = TRUE))
+  
+  
+  
+  # Action to remove outliers
+  observeEvent(input$apply_outlier_action, {
+    req(input$outlier_action == "Remove")  # Ensure "Remove" is selected
+    df <- dataProcessed()                   # Get the current data
+    #outliers <- reactiveOutliers()          # Get the current outliers
+    outliers_df <- detectOutliers(df)  
+    
+    if (nrow(outliers_df) > 0) {
+      # Loop through all variables and remove outliers
+      for (var in unique(outliers_df$Variable)) {
+        outlier_values <- outliers_df$OutlierValue[outliers_df$Variable == var]
+        df <- df[!df[[var]] %in% outlier_values, ]
       }
-      =======
-        # Reactive values for data and missing data info
-        values <- reactiveValues(data = NULL, missingInfo = NULL, acp_result = NULL, afcm_result = NULL)
-      
-      observeEvent(input$load, {
-        req(input$file1)
-        
-        df <- read.csv(input$file1$datapath, header = TRUE, stringsAsFactors = FALSE)
-        >>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
-        
-        if (input$dummy) {
-          df <- dummifyData(df)
-        }
-        
-        
-        
-        
-        dataProcessed(df)
-      })
-      
-      
-      # Utilisez une valeur réactive pour contrôler quel tableau est affiché
-      currentView <- reactiveVal(NULL)
-      
-      observeEvent(input$show_missing, {
-        currentView("missing")
-        
-      })
-      
-      # Observateur pour le bouton d'affichage des données
-      observeEvent(input$show_data, {
-        # Utiliser la valeur réactive pour afficher les données
-        currentView("data")
-      })
-      
-      
-      observeEvent(input$show_outliers, {
-        currentView("outliers")
-        
-      })
-      
-      
-      output$dynamicTableUI <- renderUI({
-        if(currentView() == "missing") {
-          DTOutput("missingDetailsTable")
-        } else if(currentView() == "outliers") {
-          {
-            tagList(
-              DTOutput("outliersTable"),
-              hr(),
-              selectInput("outlier_action", "Action on outliers:", choices = c("None", "Remove")),
-              actionButton("apply_outlier_action", "Apply Action")
-            )
-          } 
-        }
-        else if(currentView() == "data") {
-          DTOutput("dataTable")
-        }
-        <<<<<<< HEAD
-      })
-      
-      
-      # Affichage des données
-      output$dataTable <- renderDT({
-        req(dataProcessed())
-        dataProcessed()
-      }, options = list(pageLength = 10, autoWidth = TRUE))
-      
-      # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
-      output$missingDetailsTable <- renderDT({
-        if(currentView() == "missing") {
-          req(dataProcessed())
-          calculateMissingDetails(dataProcessed())
-        }
-      }, options = list(pageLength = 5, searching = FALSE))
-      
-      
-      
-      # Générer le tableau des outliers uniquement lorsque l'utilisateur clique sur "Détails" sous "Outliers"
-      output$outliersTable <- renderDT({
-        if(currentView() == "outliers") {
-          req(dataProcessed())
-          detectOutliers(dataProcessed())
-        }
-      }, options = list(pageLength = 5, searching = FALSE))
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      # Mettre à jour le tableau des détails des valeurs manquantes dynamiquement
-      # Observateur pour afficher les détails des valeurs manquantes
-      observeEvent(input$show_missing, {
-        req(dataProcessed())
-        df_details <- calculateMissingDetails(dataProcessed())
-        
-        
-        # Définir le contenu UI pour le tableau et les options de traitement
-        output$dynamicTableUI <- renderUI({
-          tagList(
-            DTOutput("missingDetailsTable"), # Affiche d'abord le tableau
-            hr(), # Ajouter une séparation visuelle
-            selectInput("quantitative_method", "Méthode pour les variables quantitatives:", 
-                        choices = c("Moyenne" = "mean", "Médiane" = "median", "Mode" = "mode")),
-            selectInput("qualitative_method", "Méthode pour les variables qualitatives:", 
-                        choices = c("Mode" = "mode", "Nouvelle Catégorie" = "new_category")),
-            actionButton("apply_mv_treatment", "Appliquer")
-          )
-        })
-        
-        # Configurer l'affichage du tableau des valeurs manquantes
-        output$missingDetailsTable <- renderDT({
-          df_details
-        }, options = list(pageLength = 5, searching = FALSE))
-      })
-      
-      
-      # Appliquer les méthodes d'imputation lorsque demandé
-      observeEvent(input$apply_mv_treatment, {
-        req(dataProcessed(), input$quantitative_method, input$qualitative_method)
-        df <- imputeData(dataProcessed(), input$quantitative_method, input$qualitative_method)
-        dataProcessed(df) # Mettre à jour les données traitées
-        # Si vous souhaitez mettre à jour le tableau des détails des valeurs manquantes après l'imputation
-        output$missingDetailsTable <- renderDT(calculateMissingDetails(df), options = list(pageLength = 5, searching = FALSE))
-      })
-      
-      
-      
-      
-      
-      # Pour stocker les noms des variables catégorielles et numériques
-      varTypes <- reactiveVal(list(categorical = character(), numerical = character()))
-      
-      # Lorsque les données sont chargées ou mises à jour
-      observeEvent(dataProcessed(), {
-        df <- dataProcessed()
-        # Détecter les types de variables
-        cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
-        num_vars <- names(df)[sapply(df, is.numeric)]
-        
-        # Stocker les types de variables dans une réactive value
-        varTypes(list(categorical = cat_vars, numerical = num_vars))
-      })
-      
-      # Générer le tableau pour l'affichage des types de variables
-      output$tableVariableTypes <- renderDT({
-        var_types <- varTypes()
-        # Trouver la longueur maximale
-        max_length <- max(length(var_types$categorical), length(var_types$numerical))
-        
-        # Étendre les deux listes à la longueur maximale
-        categorical_vars <- c(var_types$categorical, rep(NA, max_length - length(var_types$categorical)))
-        numerical_vars <- c(var_types$numerical, rep(NA, max_length - length(var_types$numerical)))
-        
-        # Créer un data frame pour l'affichage
-        data.frame(
-          Categorical = categorical_vars,
-          Numerical = numerical_vars,
-          stringsAsFactors = FALSE
-          =======
-            
-            # Store the data in a reactive value
-            values$data <- df
-          
-          # Update the select input for the target variable
-          updateSelectInput(session, "targetVariable", choices = names(df))
-          
-          # Identifier les variables numériques
-          values$numeric_vars <- sapply(df, function(column) is.numeric(column))
-          
-          # Extraire les colonnes des variables numériques
-          values$df_numeric <- df[values$numeric_vars]
-          
-          
-          # Calcul de l'ACP
-          values$acp_result <- PCA(values$df_numeric, graph = FALSE)
-          
-          # Conversion des variables qualitatives en variables factices pour l'AFDM
-          #df_afcm <- dummifyData(df)
-          
-          # Identifier les variables catégorielles
-          values$categorical_vars <- sapply(df, function(column) is.character(column) || is.factor(column))
-          
-          # Extraire les colonnes des variables catégorielles
-          values$df_categ <- df[values$categorical_vars]
-          
-          # Calcul de l'AFDM
-          values$afcm_result <- MCA(values$df_categ, graph = FALSE)
-      })
-        
-        output$dataSummaryUI <- renderUI({
-          req(values$data)
-          
-          # Séparation des variables quantitatives et qualitatives
-          quant_vars <- Filter(is.numeric, values$data)
-          qual_vars <- Filter(is.character, values$data)
-          
-          # Affichage des résumés pour les variables quantitatives
-          quant_summary <- lapply(names(quant_vars), function(var) {
-            first_few <- head(values$data[[var]], 3)
-            list(QuantitativeVariable = var, FirstFewValues = first_few)
-          })
-          
-          # Affichage des résumés pour les variables qualitatives
-          qual_summary <- lapply(names(qual_vars), function(var) {
-            first_few <- head(values$data[[var]], 3)
-            list(QualitativeVariable = var, FirstFewValues = first_few)
-          })
-          
-          # Affichage des valeurs manquantes
-          missing_info <- sapply(values$data, function(x) sum(is.na(x)))
-          missing_data_summary <- paste("Valeurs manquantes par variable:\n", toString(missing_info))
-          
-          # Création de l'UI output pour les résumés
-          tagList(
-            box(title = "Variables Quantitatives", width = 6, status = "primary", solidHeader = TRUE,
-                verbatimTextOutput("quantitativeSummaryText")),
-            box(title = "Variables Qualitatives", width = 6, status = "primary", solidHeader = TRUE,
-                verbatimTextOutput("qualitativeSummaryText")),
-            box(title = "Valeurs manquantes", width = 12, status = "primary", solidHeader = TRUE,
-                verbatimTextOutput("missingDataText"))
-            >>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
-          )
-        }, options = list(pageLength = 5, searching = TRUE))
-        
-        <<<<<<< HEAD
-        
-        
-        # Action to remove outliers
-        observeEvent(input$apply_outlier_action, {
-          req(input$outlier_action == "Remove")  # Ensure "Remove" is selected
-          df <- dataProcessed()                   # Get the current data
-          #outliers <- reactiveOutliers()          # Get the current outliers
-          outliers_df <- detectOutliers(df)  
-          
-          if (nrow(outliers_df) > 0) {
-            # Loop through all variables and remove outliers
-            for (var in unique(outliers_df$Variable)) {
-              outlier_values <- outliers_df$OutlierValue[outliers_df$Variable == var]
-              df <- df[!df[[var]] %in% outlier_values, ]
-            }
-            dataProcessed(df)  # Update the processed data without outliers
-            reactiveOutliers(NULL)  # Reset the reactive value for outliers
-            =======
-              output$quantitativeSummaryText <- renderText({
-                req(values$data)
-                quant_vars <- Filter(is.numeric, values$data)
-                # Affichage des résumés pour les variables quantitatives
-                quant_summary <- lapply(names(quant_vars), function(var) {
-                  first_few <- head(values$data[[var]], 3)
-                  paste("Variable:", var, "\n", "Premières valeurs:", toString(first_few), "\n\n")
-                })
-                paste(quant_summary, collapse = "\n")
-              })
-            
-            output$qualitativeSummaryText <- renderText({
-              req(values$data)
-              qual_vars <- Filter(is.character, values$data)
-              # Affichage des résumés pour les variables qualitatives
-              qual_summary <- lapply(names(qual_vars), function(var) {
-                first_few <- head(values$data[[var]], 3)
-                paste("Variable:", var, "\n", "Premières valeurs:", toString(first_few), "\n\n")
-              })
-              paste(qual_summary, collapse = "\n")
-            })
-            
-            output$missingDataText <- renderText({
-              req(values$data)
-              missing_info <- sapply(values$data, function(x) sum(is.na(x)))
-              paste("Valeurs manquantes par variable:\n", toString(missing_info))
-            })
-            
-            output$missingDataOptionsUI <- renderUI({
-              req(values$data)
-              # UI for missing data treatment options
-              tagList(
-                radioButtons("missingDataTreatment", "Traitement des valeurs manquantes:",
-                             choices = c("Remplacer par la moyenne" = "mean", "Supprimer" = "omit")),
-                actionButton("applyTreatment", "Appliquer le traitement")
-              )
-            })
-            
-            observeEvent(input$applyTreatment, {
-              req(values$data)
-              treatment <- input$missingDataTreatment
-              for (varName in names(values$missingInfo)) {
-                if (values$missingInfo[varName] > 0 && treatment == "mean") {
-                  if (is.numeric(values$data[[varName]])) {
-                    # Replace missing values with the mean for numeric variables
-                    values$data[[varName]][is.na(values$data[[varName]])] <- mean(values$data[[varName]], na.rm = TRUE)
-                    cat('tot1')
-                  } else if (is.character(values$data[[varName]])) {
-                    # Replace missing values with the mode for character variables
-                    values$data[[varName]][is.na(values$data[[varName]])] <- Mode(values$data[[varName]])
-                    cat('toto2')
-                  }
-                }
-                >>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
-              }
-              
-              # Update the table to reflect the changes
-              output$outliersTable <- renderDT({
-                detectOutliers(dataProcessed())
-              }, options = list(pageLength = 5, autoWidth = TRUE))
-            })
-            
-            <<<<<<< HEAD
-            
-            
-            =======
-              output$visualisationPlot <- renderPlot({
-                req(values$data, input$visualizationType)
-                
-                if (input$visualizationType == "var") {
-                  # Sélection des premières observations en fonction du slider
-                  df_subset <- values$df_numeric[1:input$numObservations, ]
-                  
-                  # Calcul de l'ACP
-                  acp_result <- PCA(df_subset, graph = FALSE)
-                  
-                  # Affichage du cercle des corrélations pour l'ACP sur les deux premières dimensions
-                  fviz_pca_var(acp_result, col.var = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
-                               repel = TRUE, title = "ACP - Variables")
-                } else if (input$visualizationType == "ind") {
-                  # Sélection des premières observations en fonction du slider
-                  df_subset <- values$df_numeric[1:input$numObservations, ]
-                  
-                  # Calcul de l'ACP
-                  acp_result <- PCA(df_subset, graph = FALSE)
-                  
-                  # Affichage du cercle des corrélations pour l'ACP sur les deux premières dimensions
-                  fviz_pca_ind(acp_result, col.ind = "cos2", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
-                               repel = TRUE, title = "ACP - Individus")
-                }
-              })
-            >>>>>>> b99efb5159973f697274464dc64aed55f47d7a09
-            
-            # Reactive values for training models
-            trained_model <- reactiveValues()
-            
-            observeEvent(input$trainModels, {
-              req(input$file1, input$targetVariable, input$selectedModel)
-              
-              # Séparer les données en variables explicatives (X) et variable cible (Y)
-              X_train <- values$df_numeric[, -which(names(values$df_numeric) == input$targetVariable, arr.ind = TRUE)]
-              Y_train <- values$df_numeric[, input$targetVariable]
-              
-              print(Y_train)
-              
-              # Entraîner le modèle sélectionné
-              if (input$selectedModel == "lm") {
-                model <- lm(Y_train ~ ., data = values$df_numeric)
-              } else if (input$selectedModel == "rpart") {
-                model <- rpart(Y_train ~ ., data = values$df_numeric, method = "anova")
-              }
-              
-              
-              # Stocker le modèle entraîné dans reactiveValues
-              trained_model$model <- model
-            })
-            
-            # Comparaison des modèles
-            output$modelComparisonPlot <- renderPlot({
-              req(trained_model$model)
-              
-              # Ajoutez votre logique pour la comparaison des modèles ici
-              # Vous pouvez utiliser des métriques comme la précision, le rappel, le F-score, ROC, AUC, etc.
-              # Exemple simplifié:
-              results <- confusionMatrix(predict(trained_model$model, newdata = X_train, type = "response"), Y_train)
-              plot(results)
-            })
-            
-            # Afficher les résultats
-            output$modelResultsText <- renderText({
-              req(trained_model$model)
-              
-              # Ajoutez votre logique pour afficher les résultats ici
-              # Vous pouvez extraire les performances du modèle et afficher les métriques souhaitées
-              # Exemple simplifié:
-              results <- confusionMatrix(predict(trained_model$model, newdata = X_train, type = "response"), Y_train)
-              paste("Résultats de l'Entraînement du Modèle:\n", results)
-            })
-          }
-          
-          
-          shinyApp(ui, server)
-          
+      dataProcessed(df)  # Update the processed data without outliers
+      reactiveOutliers(NULL)  # Reset the reactive value for outliers
+    }
+    
+    # Update the table to reflect the changes
+    output$outliersTable <- renderDT({
+      detectOutliers(dataProcessed())
+    }, options = list(pageLength = 5, autoWidth = TRUE))
+  })
+  
+  
+  
+  
+}
+
+shinyApp(ui, server)
