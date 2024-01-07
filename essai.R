@@ -150,7 +150,7 @@ server <- function(input, output, session) {
     ext <- tools::file_ext(inFile$datapath)
     df <- switch(ext,
                  csv = { read.csv(inFile$datapath) },
-                 dat = { read.table(inFile$datapath, header = TRUE) },
+                 dat = { read.table(inFile$datapath) },
                  txt = { read.delim(inFile$datapath) },
                  data = read.table(inFile$datapath, header = TRUE, sep = ","),
                  stop("Type de fichier non supporté")
