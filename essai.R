@@ -5,7 +5,13 @@ library(factoextra)
 library(rpart)
 library(caret)
 library(randomForest)
-
+library(tools)
+library(magrittr)
+library(shinyjs)
+library(plotly)
+library(kernlab)
+library(e1071)
+library(pROC)
 
 
 # Fonction de normalisation
@@ -54,7 +60,7 @@ ui <- dashboardPage(
                            min = 1, max = 3750, value = 100, step = 1),
                plotOutput("visualisationPlot")
       ),
-      tabPanel("Modèles de Classification",
+      tabPanel("Regression",
                fluidRow(
                  column(6,
                         box(title = "Entraînement des Modèles",
@@ -79,6 +85,64 @@ ui <- dashboardPage(
                         )
                  )
                )
+      ),
+      tabPanel("Classification",
+               fluidRow(
+                 h2("Performance metric"),
+                 actionButton("trainClassification", "Entraîner les Modèles"),
+                 fluidRow(
+                   tabBox(
+                     title = tagList(shiny::icon("gear"), "Hyperparameter"), 
+                     id = "tabsetParam", height = "360px", width = 4,
+                     tabPanel("SVM",
+                              sliderInput("svmCost", label = "cost", min = 0.0000001, max = 1, value = 0.01, ticks = F),
+                              checkboxInput("svmScale", label = "scale", value = TRUE)
+                     ),
+                     tabPanel("Decisiontree",
+                              sliderInput("treeMinSplit", label = "minsplit", min = 20, max = 500, value = 20, ticks = F),
+                              sliderInput("treeMaxDepth", label = "maxdepth", min = 2, max = 30, value = 5, ticks = F),
+                              checkboxInput("treePruning", label = "pruning", value = TRUE)
+                     )
+                   ),
+                   tabBox(
+                     title = tagList(shiny::icon("table"), "Classification metrics"),
+                     id = "tabsetMetric", height = "360px", width = 8,
+                     tabPanel("SVM", 
+                              tableOutput("svmTable") 
+                     ),
+                     tabPanel("Decisiontree",
+                              tableOutput("treeTable") ,
+                              actionButton(inputId = "treePlot", label = "Plot tree", icon = icon("tree"))
+                     )
+                   )
+                 ),
+                 h2("AUC Curve"),
+                 fluidRow(
+                   box(
+                     title = "SVM", height = "470px", width = 4,
+                     plotOutput("rocSvm") 
+                   ),
+                   box(
+                     title ="DecisonTree", height = "470px", width = 4,
+                     plotOutput("rocTree") 
+                   )
+                 ),
+                 h2("Confusion matrix"),
+                 fluidRow(
+                   box(
+                     title = "SVM", height = "470px", width = 4,
+                     plotlyOutput("confusionSVM") 
+                   ),
+                   box(
+                     title = "Logistic", height = "470px", width = 4,
+                     plotlyOutput("confusionLogistic") 
+                   ),
+                   box(
+                     title = "DecisonTree", height = "470px", width = 4,
+                     plotlyOutput("confusionTree") 
+                   )
+                 )
+               )
       )
     )
   )
@@ -90,14 +154,26 @@ server <- function(input, output, session) {
   values <- reactiveValues(data = NULL, missingInfo = NULL, acp_result = NULL, afcm_result = NULL)
   
   observeEvent(input$load, {
-    req(input$file1)
     
-    df <- read.csv(input$file1$datapath, header = TRUE, stringsAsFactors = FALSE)
+    inFile <- input$file1
+    if (is.null(inFile)) return(NULL)
+    
+    # Extraire l'extension du fichier
+    if (is.null(inFile)) return(NULL)
+    
+    ext <- file_ext(inFile$datapath)
+    df <- switch(ext,
+                 csv = { read.csv(inFile$datapath) },
+                 dat = { read.table(inFile$datapath, header = FALSE) },
+                 txt = { read.delim(inFile$datapath) },
+                 stop("Type de fichier non supporté")
+    )
+    
+    #df <- read.csv(input$file1$datapath, header = TRUE, stringsAsFactors = FALSE)
     
     if (input$dummy) {
       df <- dummifyData(df)
     }
-    
     if (input$normalize) {
       df <- as.data.frame(lapply(df, normalizeData))
     }
@@ -129,8 +205,7 @@ server <- function(input, output, session) {
     # Extraire les colonnes des variables catégorielles
     values$df_categ <- df[values$categorical_vars]
     
-    # Calcul de l'AFDM
-    values$afcm_result <- MCA(values$df_categ, graph = FALSE)
+    
   })
   
   output$dataSummaryUI <- renderUI({
@@ -261,9 +336,9 @@ server <- function(input, output, session) {
     X <- values$df_numeric[, -which(names(values$df_numeric) == input$targetVariable, arr.ind = TRUE)]
     Y <- values$df_numeric[, input$targetVariable]
     
+    
     # Diviser les données en ensembles d'entraînement et de test (80% train, 20% test)
     set.seed(123)  # Pour la reproductibilité
-    
     splitIndex <- createDataPartition(Y, p = 0.8, list = FALSE)
     X_train <- X[splitIndex, ]
     Y_train <- Y[splitIndex]
@@ -294,6 +369,77 @@ server <- function(input, output, session) {
     test$X_test <- X_test
     test$Y_test <- Y_test
   })
+  
+  trained_class <- reactiveValues( svm = NULL, rf = NULL)
+  test_class <- reactiveValues(X_test_class = NULL, Y_test_class = NULL)
+  train <- reactiveValues(dat = NULL, X_train = NULL)
+  
+  observeEvent(input$trainClassification, {
+    req(values$data, input$file1, input$targetVariable)
+    
+    # Séparer les données en variables explicatives (X) et variable cible (Y)
+    X <- values$data[, -which(names(values$data) == input$targetVariable, arr.ind = TRUE)]
+    Y <- values$data[, input$targetVariable]
+    Y_binary <- ifelse(Y == 2, 1, 0)
+    
+    # Diviser les données en ensembles d'entraînement et de test (80% train, 20% test)
+    set.seed(123)  # Pour la reproductibilité
+    splitIndex <- createDataPartition(Y_binary, p = 0.8, list = FALSE)
+    X_train <- X[splitIndex, ]
+    Y_train <- Y_binary[splitIndex]
+    X_test <- X[-splitIndex, ]
+    Y_test <- Y_binary[-splitIndex]
+    
+    dat <- cbind(X_train, y = as.factor(Y_train))
+    
+    # Entraîner le modèle SVM
+    trained_class$svm <- svm(y ~ ., data = dat, kernel = "linear", scale = FALSE, probability=TRUE)
+    
+    # Entraîner le modèle Random Forest
+    trained_class$rf <- randomForest(y ~ .,  data = dat,  importance = TRUE, proximity = TRUE)
+    
+    # Stocker les données de test dans reactiveValues
+    test_class$X_test_class <- X_test
+    test_class$Y_test_class <- Y_test
+  })
+
+  output$rocSvm <- renderPlot({
+    req(values$data, test_class, trained_class)
+    
+    dat_test <- cbind(test_class$X_test_class, as.factor(test_class$Y_test_class))
+    
+    # Faire des prédictions avec le modèle SVM
+    predictions_svm <- predict(trained_class$svm, newdata = dat_test)
+    
+    # Obtenir les probabilités postérieures pour la classe 1
+    probabilities_svm <- attr(predict(trained_class$svm, newdata = dat_test, probability = TRUE), "probabilities")[, 2]
+    
+    # Créer la courbe ROC avec les probabilités postérieures
+    roc_svm <- roc(test_class$Y_test_class, probabilities_svm)
+    plot(roc_svm)
+    # Tracer la courbe ROC avec Plotly
+    #plot_ly(x = roc_svm$fpr, y = roc_svm$tpr, type = 'scatter', mode = 'lines', name = 'ROC Curve') %>%
+    #  layout(title = 'Courbe ROC - SVM',
+    #         xaxis = list(title = 'Taux de Faux Positifs'),
+    #         yaxis = list(title = 'Taux de Vrais Positifs'))
+  })
+  
+  output$rocTree <- renderPlot({
+    req(values$data, test_class, trained_class)
+    
+    dat_test <- cbind(test_class$X_test_class, as.factor(test_class$Y_test_class))
+    
+    # Faire des prédictions avec le modèle Random Forest
+    #predictions_rf <- predict(trained_class$rf, newdata = dat_test)
+    
+    # Use the probability of the positive class (class '1')
+    probabilities_rf <- as.numeric(predict(trained_class$rf, newdata = dat_test, type = "prob")[, 2])
+    
+    roc_rf <- roc(test_class$Y_test_class, probabilities_rf)
+    plot(roc_rf)
+  })
+  
+  
   
   
   # Comparaison des modèles
