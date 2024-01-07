@@ -1,6 +1,19 @@
+library(DT)
 library(shiny)
 library(shinydashboard)
-library(DT)
+library(FactoMineR)
+library(factoextra)
+library(rpart)
+library(caret)
+library(randomForest)
+library(tools)
+library(magrittr)
+library(shinyjs)
+library(plotly)
+library(kernlab)
+library(e1071)
+library(pROC)
+
 
 # Fonction pour calculer le mode
 Mode <- function(x) {
@@ -133,7 +146,14 @@ ui <- dashboardPage(
                 tabPanel("Plot", value = "plot_panel", plotOutput("dataPlot")),
                 tabPanel("Déséquilibre des Classes",
                          DTOutput("tableVariableTypes")
-                )
+                ),
+                tabPanel("ACP Visualisation",
+                         radioButtons("visualizationType", "Correlation entre les :",
+                                      choices = c("Individus" = "ind", "Variables" = "var"), selected = "VAR"),
+                         sliderInput("numObservations", "Nombre d'observations à inclure dans l'ACP:",
+                                     min = 1, max = 3750, value = 100, step = 1),
+                         plotOutput("visualisationPlot")
+                ),
     )
   )
 )
@@ -348,6 +368,32 @@ server <- function(input, output, session) {
     output$outliersTable <- renderDT({
       detectOutliers(dataProcessed())
     }, options = list(pageLength = 5, autoWidth = TRUE))
+  })
+  
+  output$visualisationPlot <- renderPlot({
+    req(dataOriginal, input$visualizationType,input$numObservations)
+    
+    # Identifier les variables numériques
+    numeric_vars <- sapply(dataOriginal(), function(column) is.numeric(column))
+    
+    # Extraire les colonnes des variables numériques
+    df_numeric <- dataOriginal()[numeric_vars]
+    
+    # Sélection des premières observations en fonction du slider
+    df_subset <- df_numeric[1:input$numObservations, ]
+    
+    # Calcul de l'ACP
+    acp_result <- PCA(df_subset, graph = FALSE)
+    
+    if (input$visualizationType == "var") {
+      # Affichage du cercle des corrélations pour l'ACP sur les deux premières dimensions
+      fviz_pca_var(acp_result, col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+                   repel = TRUE, title = "ACP - Variables")
+    } else if (input$visualizationType == "ind") {
+      # Affichage du cercle des corrélations pour l'ACP sur les deux premières dimensions
+      fviz_pca_ind(acp_result, col.ind = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+                   repel = TRUE, title = "ACP - Individus")
+    }
   })
   
   
