@@ -116,6 +116,23 @@ detectOutliers <- function(df) {
   return(outliers_df)
 }
 
+# Fonction pour afficher la matrice de confusion avec plotly
+plot_confusion_matrix <- function(confusion, title) {
+  plot_ly(
+    x = confusion$positive,
+    y = confusion$Reference,
+    z = confusion$table,
+    type = "heatmap",
+    colorscale = "Viridis",
+    showscale = TRUE
+  ) %>%
+    layout(
+      title = title,
+      xaxis = list(title = "Prédictions", ticks = "outside"),
+      yaxis = list(title = "Référence", ticks = "outside")
+    )
+}
+
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
@@ -154,6 +171,35 @@ ui <- dashboardPage(
                                      min = 1, max = 3750, value = 100, step = 1),
                          plotOutput("visualisationPlot")
                 ),
+                tabPanel("Classification",
+                         fluidRow(
+                           h2("Performance metric"),
+                           selectInput("targetVariable", "Variable Cible", choices = NULL),
+                           actionButton("trainClassification", "Entraîner les Modèles"),
+                           h2("AUC Curve"),
+                           fluidRow(
+                             box(
+                               title = "SVM", height = "470px", width = 5,
+                               plotOutput("rocSvm") 
+                             ),
+                             box(
+                               title ="Random Forest", height = "470px", width = 5,
+                               plotOutput("rocTree") 
+                             )
+                           ),
+                           h2("Confusion matrix"),
+                           fluidRow(
+                             box(
+                               title = "SVM", height = "470px", width = 5,
+                               plotlyOutput("confusionSVM") 
+                             ),
+                             box(
+                               title = "DecisonTree", height = "470px", width = 5,
+                               plotlyOutput("confusionTree") 
+                             )
+                           )
+                         )
+                )
     )
   )
 )
@@ -175,6 +221,11 @@ server <- function(input, output, session) {
                  data = read.table(inFile$datapath, header = TRUE, sep = ","),
                  stop("Type de fichier non supporté")
     )
+    
+    # Update the select input for the target variable
+    # Mettre à jour le select input avec la dernière colonne par défaut
+    last_column_name <- tail(names(df), 1)
+    updateSelectInput(session, "targetVariable", choices = names(df), selected = last_column_name)
     
     dataOriginal(df)
     dataProcessed(df)
@@ -396,7 +447,99 @@ server <- function(input, output, session) {
     }
   })
   
+  trained_model_class <- reactiveValues( svm = NULL, rf = NULL)
+  test_class <- reactiveValues(X_test_class = NULL, Y_test_class = NULL)
+  train_class <- reactiveValues(dat = NULL, X_train_class = NULL, Y_train_class = NULL)
+  probabilities <- reactiveValues(svm = NULL, rf = NULL)
+  predictions <- reactiveValues(svm = NULL, rf = NULL)
   
+  observeEvent(input$trainClassification, {
+    req(dataOriginal(), input$file1, input$targetVariable, probabilities, predictions, train_class, test_class)
+    
+    df <- dataOriginal()
+    
+    # Séparer les données en variables explicatives (X) et variable cible (Y)
+    X <- df[, -which(names(df) == input$targetVariable, arr.ind = TRUE)]
+    Y <- df[, input$targetVariable]
+    Y_binary <- ifelse(Y == 2, 1, 0)
+    
+    # Diviser les données en ensembles d'entraînement et de test (80% train, 20% test)
+    set.seed(123)  # Pour la reproductibilité
+    splitIndex <- createDataPartition(Y_binary, p = 0.8, list = FALSE)
+    train_class$X_train_class <- X[splitIndex, ]
+    train_class$Y_train_class <- Y_binary[splitIndex]
+    test_class$X_test_class <- X[-splitIndex, ]
+    test_class$Y_test_class <- Y_binary[-splitIndex]
+    
+    train_class$dat <- cbind( train_class$X_train_class, y = as.factor( train_class$Y_train_class))
+    
+    # Entraîner le modèle SVM
+    trained_model_class$svm <- svm(y ~ ., data = train_class$dat, kernel = "linear", scale = FALSE, probability=TRUE)
+    
+    # Entraîner le modèle Random Forest
+    trained_model_class$rf <- randomForest(y ~ .,  data = train_class$dat,  importance = TRUE, proximity = TRUE)
+    
+    dat_test <- cbind(test_class$X_test_class, as.factor(test_class$Y_test_class))
+    
+    # Faire des prédictions avec le modèle SVM
+    predictions$svm <- predict(trained_model_class$svm, newdata = dat_test)
+    
+    # Obtenir les probabilités postérieures pour la classe 1
+    probabilities$svm <- attr(predict(trained_model_class$svm, newdata = dat_test, probability = TRUE), "probabilities")[, 2]
+    
+    # Faire des prédictions avec le modèle Random Forest
+    predictions$rf <- predict(trained_model_class$rf, newdata = dat_test)
+    
+    # Use the probability of the positive class (class '1')
+    probabilities$rf <- as.numeric(predict(trained_model_class$rf, newdata = dat_test, type = "prob")[, 2])
+    
+  })
+  
+  
+  output$rocSvm <- renderPlot({
+    req(test_class, probabilities)
+    
+
+    # Créer la courbe ROC avec les probabilités postérieures
+    roc_svm <- roc(test_class$Y_test_class, probabilities$svm)
+    
+    # Tracer le graphique ROC
+    plot(roc_svm, col = "blue", lwd = 2, main = "Courbe ROC - SVM")
+    
+    
+    # Ajouter une légende avec la valeur AUC
+    legend("bottomright", legend = paste("AUC =", round(auc(roc_svm), 3)), col = "white", bg = "transparent", cex = 0.8)
+  })
+  
+  output$rocTree <- renderPlot({
+    req(test_class, probabilities)
+    
+    roc_rf <- roc(test_class$Y_test_class, probabilities$rf)
+    plot(roc_rf, col = "blue", lwd = 2, main = "Courbe ROC - RANDOM FOREST")
+    
+    # Ajouter une légende avec la valeur AUC
+    legend("bottomright", legend = paste("AUC =", round(auc(roc_rf), 3)), col = "white", bg = "transparent", cex = 0.8)
+  })
+  
+  output$confusionSVM <- renderPlotly({
+    req(predictions,test_class)
+    
+    # Construire la matrice de confusion
+    confusion_svm <- confusionMatrix(predictions$svm, as.factor(test_class$Y_test_class))
+    
+    # Afficher la matrice de confusion
+    plot_confusion_matrix(confusion_svm, title = "Matrice de Confusion - SVM")
+  })
+  
+  output$confusionTree <- renderPlotly({
+    req(predictions,test_class)
+    
+    # Construire la matrice de confusion
+    confusion_rf <- confusionMatrix(predictions$rf, as.factor(test_class$Y_test_class))
+    
+    # Afficher la matrice de confusion
+    plot_confusion_matrix(confusion_rf, title = "Matrice de Confusion - RANDOM FOREST")
+  })
   
   
 }
