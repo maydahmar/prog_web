@@ -33,27 +33,24 @@ normalizeData <- function(df) {
   return(df)
 }
 
+# Modifier la fonction dummifyData pour inclure les caractères
 dummifyData <- function(df) {
-  cat_columns_before <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
   df[] <- lapply(df, function(x) {
     if (is.factor(x) || is.character(x)) {
-      dummy_matrix <- model.matrix(~ x - 1)[, -1]
-      cat_columns_after <- names(dummy_matrix)
-      message("Cat columns before: ", paste(cat_columns_before, collapse = ", "))
-      message("Cat columns after: ", paste(cat_columns_after, collapse = ", "))
-      
-      # Check the frequencies of categories in dummy_matrix
-      for (col in cat_columns_after) {
-        cat_freq <- table(dummy_matrix[, col])
-        message(paste("Category frequencies for", col, ":", toString(cat_freq)))
-      }
-      
-      dummy_matrix
+      dummy_matrix <- model.matrix(~ x - 1)
+      dummy_matrix <- dummy_matrix[, -1]  # Remove intercept
+      colnames(dummy_matrix) <- make.names(colnames(dummy_matrix))
+      return(as.data.frame(dummy_matrix))
     } else {
-      x
+      return(x)
     }
   })
-  return(df)
+  
+  # Combine all dummy data frames
+  df_dummified <- do.call(cbind, df)
+  
+  # Return the modified data frame
+  return(df_dummified)
 }
 
 
@@ -166,12 +163,17 @@ ui <- dashboardPage(
                                collapsible = TRUE, actionButton("show_outliers", "Détails")),
                            
                            box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
-                               collapsible = TRUE, actionButton("show_missing", "Détails"))
+                               collapsible = TRUE, actionButton("show_missing", "Détails")),
+                           
+                           
                            
                            
                          ),
                          uiOutput("dynamicTableUI") 
                 ),
+                tabPanel("Données Dummifiées", 
+                         DTOutput("tableDummified")),
+                
                 tabPanel("Plot", value = "plot_panel", plotOutput("dataPlot")),
                 tabPanel("Déséquilibre des Classes",
                          DTOutput("tableVariableTypes")
@@ -280,6 +282,21 @@ server <- function(input, output, session) {
     dataOriginal(df)
     dataProcessed(df)
   })
+  
+  
+  observeEvent(input$dummy, {
+    req(input$dummy)  # Vérifie si la case est cochée
+    df <- dataOriginal()  # Récupère les données originales
+    df_dummified <- dummifyData(df)  # Dummifie les données
+    dataProcessed(df_dummified)  # Met à jour la valeur réactive avec les données dummifiées
+    
+    # Maintenant, affichez les données dummifiées dans la table
+    output$tableDummified <- renderDataTable({
+      req(dataProcessed())  # Assurez-vous que les données sont chargées
+      dataProcessed()  # Renvoie les données dummifiées pour l'affichage
+    })
+  })
+   
   # Appliquer ou annuler la normalisation et la dummification
   observe({
     req(dataOriginal())
@@ -289,9 +306,9 @@ server <- function(input, output, session) {
       df <- normalizeData(df)
     }
     
-    if (input$dummy) {
-      df <- dummifyData(df)
-    }
+    #if (input$dummy) {
+     # df <- dummifyData(df)
+   # }
     
     
     
