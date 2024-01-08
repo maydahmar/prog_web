@@ -1,7 +1,10 @@
 library(shiny)
 library(shinydashboard)
 library(DT)
+library(plotly) 
+library(tidyverse)
 
+##-------------------------- Fonction  pretraitement --------------------------
 # Fonction pour calculer le mode
 Mode <- function(x) {
   ux <- unique(na.omit(x))
@@ -74,7 +77,6 @@ calculateMissingDetails <- function(df) {
   na_detail
 }
 
-
 # Fonction pour détecter les outliers
 detectOutliers <- function(df) {
   # Créer un data frame pour stocker les outliers
@@ -103,11 +105,68 @@ detectOutliers <- function(df) {
   return(outliers_df)
 }
 
+##-------------------------- Fonction  visualisation --------------------------
+# Univar --------------------------
+#Fonction de camembert  
+pie <- function(dataset, x.name) {
+  fig <- plot_ly(dataset, labels = ~dataset[[x.name]], type = 'pie')
+  fig <- fig %>% layout(
+    title = paste0("Proportion de ", x.name),
+    xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+    yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE)
+  )
+  return(fig)
+}
+
+# Fonction pour créer un diagramme en bâtons des effectifs 
+createBarPlot <- function(data, variable, x_label, y_label, title) {
+  freq_table <- table(data[[variable]])
+  fig <- plot_ly(x = as.numeric(names(freq_table)), y = freq_table, type = 'bar')
+  fig <- fig %>% layout(xaxis = list(title = x_label), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+button.to.remove <- c("zoom", "pan", "select", "zoomIn", "zoomOut", "autoScale", "resetScale", "lasso2d", "hoverClosestCartesian", "hoverCompareCartesian")
+
+# Fonction pour créer un diagramme cumulatif des effectifs 
+createCumulativePlot <- function(x, x_label, y_label, title) {
+  freq_table <- table(x)
+  freq_x <- freq_table/sum(length(x))
+  cum_freq <- cumsum(freq_x)
+  fig <- plot_ly(x = names(freq_table), y = cum_freq, type = 'bar')
+  fig <- fig %>% layout(xaxis = list(title = x_label), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+# Fonction pour créer un boite a moustache 
+createBoxplot <- function(data, variable, y_label, title, box_size = 0.3) {
+  fig <- plot_ly(data, y = ~data[[variable]], type = 'box', boxpoints = 'outliers')
+  fig <- fig %>% layout(yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+# Fonction pour créer un courbe cululitive 
+createCumulativePlotCont <- function(x, x_label, y_label, title) {
+  freq_table <- table(x)
+  cum_freq <- cumsum(freq_table)
+  x_vals <- as.numeric(names(freq_table))
+  y_vals <- cum_freq
+  fig <- plot_ly() %>%
+    add_trace(
+      type = 'scatter',
+      mode = 'markers+lines',
+      x = x_vals,
+      y = y_vals,
+      marker = list(color = 'green4'),
+      line = list(color = 'green4', width = 2)
+    ) %>%
+    layout(xaxis = list(title = x_label), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
 
 
-#--------------------------------------------------------------------------------
 
-# UI
+# ------------------------------------------------------------ UI ------------------------------------------------------------
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
   dashboardSidebar(
@@ -120,18 +179,19 @@ ui <- dashboardPage(
     tabsetPanel(id = "tabs",
                 tabPanel("Données", value = "data_panel",
                          fluidRow(
-                           box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
-                               collapsible = TRUE, actionButton("show_missing", "Détails")),
-                           box(title = "Variables qualitatives", status = "warning", solidHeader = TRUE, width = 4,
-                               collapsible = TRUE, actionButton("show_qualitative", "Détails")),
                            box(title = "Outliers", status = "danger", solidHeader = TRUE, width = 4,
                                collapsible = TRUE, actionButton("show_outliers", "Détails")),
+                           box(title = "Variables qualitatives", status = "warning", solidHeader = TRUE, width = 4,
+                               collapsible = TRUE, actionButton("show_qualitative", "Détails")),
+                           
+                           box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
+                               collapsible = TRUE, actionButton("show_missing", "Détails"))
+                           
                            
                          ),
                          uiOutput("dynamicTableUI") 
                 ),
                 tabPanel("Plot", value = "plot_panel", plotOutput("dataPlot")),
-                
                 tabPanel("Déséquilibre des Classes", value = "imbalance_panel",
                          fluidRow(
                            box(title = "Uni var", status = "primary", solidHeader = TRUE, width = 4, 
@@ -142,18 +202,20 @@ ui <- dashboardPage(
                                collapsible = TRUE, actionButton("show_sample", "Détails")),
                            
                          ),
+                         fluidRow(
+                           box(title = "Variable", width = 15,
+                               selectInput(
+                                 "target", "Target Variable", choices = NULL
+                               )) 
+                         ),
                          uiOutput("visualUI")
-                        )
-                      )
+                )
     )
   )
+)
 
 
-
-
-#--------------------------------------------------------------------------------
-
-# Server
+# ------------------------------------------------------------Server------------------------------------------------------------
 server <- function(input, output, session) {
   dataOriginal <- reactiveVal(NULL)
   dataProcessed <- reactiveVal(NULL)
@@ -174,6 +236,28 @@ server <- function(input, output, session) {
     dataProcessed(df)
   })
   
+  # Fonction pour filtrer les variables categorielle ou numerique 
+  sortVariables <- function(data) {
+    numeric_vars <- names(Filter(is.numeric, data))
+    categorical_vars <- names(Filter(function(x) is.factor(x) | is.character(x), data))
+    
+    return(list(numerical = numeric_vars, categorical = categorical_vars))
+  }
+  
+  sorted_vars <- sortVariables(df)
+  
+  # Fonction pour filtrer les variables numerique discret ou continue  
+  sortQuantitativeVariables <- function(data) {
+    quantitative_vars <- sorted_vars$numerical
+    discrete_vars <- quantitative_vars[sapply(data[, quantitative_vars], function(x) length(unique(x)) < 10)] # Vous pouvez ajuster la limite 10 selon vos besoins
+    continuous_vars <- setdiff(quantitative_vars, discrete_vars)
+    
+    return(list(discret = discrete_vars, continue = continuous_vars))
+  }
+  
+  sorted_quant_vars <- sortQuantitativeVariables(df)
+  
+  
   # Appliquer ou annuler la normalisation et la dummification
   observe({
     req(dataOriginal())
@@ -188,13 +272,34 @@ server <- function(input, output, session) {
     }
     
     dataProcessed(df)
+    
+    updateSelectInput(session, "target", choices = names(df), selected = input$target)
+    updateSelectInput(session, "numericalVScategorical", choices = #,selected = input$numericalVScategorical)
+    )
+    updateSelectInput(session, "categoricalVSnumerical", choices = #,selected = input$categoricalVSnumerical)
+    )
+    updateSelectInput(session, "numericalVSnumerical", choices = #,selected = input$numericalVSnumerical)
+    )
+    updateSelectInput(session, "numericalVSnumerical2", choices = #,selected = input$numericalVSnumerical2)
+    )
+    updateSelectInput(session, "univarCategorical", choices = sorted_vars$categorical  ,selected = input$univarCategorical )
+    
+    updateSelectInput(session, "univarNumericaldisc", choices = sorted_quant_vars$discret ,selected = input$univarNumericaldisc)
+    
+    updateSelectInput(session, "univarNumericalcont", choices = sorted_quant_vars$continue  ,selected = input$univarNumericalcont)
+    
   })
+  
+  
+  
+  
   
   # Utilisez une valeur réactive pour contrôler quel tableau est affiché
   currentView <- reactiveVal(NULL)
   
   observeEvent(input$show_missing, {
     currentView("missing")
+    
   })
   
   observeEvent(input$show_qualitative, {
@@ -203,6 +308,15 @@ server <- function(input, output, session) {
   
   observeEvent(input$show_outliers, {
     currentView("outliers")
+    
+  })
+  
+  output$dynamicTableUI <- renderUI({
+    if(currentView() == "missing") {
+      DTOutput("missingDetailsTable")
+    } else if(currentView() == "outliers") {
+      DTOutput("outliersTable")
+    }
   })
   
   # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
@@ -221,40 +335,29 @@ server <- function(input, output, session) {
     }
   }, options = list(pageLength = 5, searching = FALSE))
   
-  
-  
-  output$dynamicTableUI <- renderUI({
-    if(currentView() == "missing") {
-      DTOutput("missingDetailsTable")
-    } else if(currentView() == "outliers") {
-      DTOutput("outliersTable")
-    }
-  })
-  
-  
-  
-  
-  
-  
-  
   # Mettre à jour le tableau des détails des valeurs manquantes dynamiquement
-  output$missingDetailsTable <- renderDT({
+  # Observateur pour afficher les détails des valeurs manquantes
+  observeEvent(input$show_missing, {
     req(dataProcessed())
     df_details <- calculateMissingDetails(dataProcessed())
-    datatable(df_details, options = list(pageLength = 5, autoWidth = TRUE, searching = FALSE))
-  })
-  
-  # UI pour les méthodes d'imputation, affichée dynamiquement
-  output$data_imputation_ui <- renderUI({
-    if (input$show_missing || input$show_qualitative) {
+    
+    # Définir le contenu UI pour le tableau et les options de traitement
+    output$dynamicTableUI <- renderUI({
       tagList(
+        DTOutput("missingDetailsTable"), # Affiche d'abord le tableau
+        hr(), # Ajouter une séparation visuelle
         selectInput("quantitative_method", "Méthode pour les variables quantitatives:", 
                     choices = c("Moyenne" = "mean", "Médiane" = "median", "Mode" = "mode")),
         selectInput("qualitative_method", "Méthode pour les variables qualitatives:", 
                     choices = c("Mode" = "mode", "Nouvelle Catégorie" = "new_category")),
         actionButton("apply_mv_treatment", "Appliquer")
       )
-    }
+    })
+    
+    # Configurer l'affichage du tableau des valeurs manquantes
+    output$missingDetailsTable <- renderDT({
+      df_details
+    }, options = list(pageLength = 5, searching = FALSE))
   })
   
   # Appliquer les méthodes d'imputation lorsque demandé
@@ -267,10 +370,41 @@ server <- function(input, output, session) {
   })
   
   
+  # Pour stocker les noms des variables catégorielles et numériques
+  varTypes <- reactiveVal(list(categorical = character(), numerical = character()))
   
-  #Afficher le camembert 
+  # Lorsque les données sont chargées ou mises à jour
+  observeEvent(dataProcessed(), {
+    df <- dataProcessed()
+    # Détecter les types de variables
+    cat_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+    num_vars <- names(df)[sapply(df, is.numeric)]
+    
+    # Stocker les types de variables dans une réactive value
+    varTypes(list(categorical = cat_vars, numerical = num_vars))
+  })
   
-  #-------------  -------------------------
+  # Générer le tableau pour l'affichage des types de variables
+  output$tableVariableTypes <- renderDT({
+    var_types <- varTypes()
+    # Trouver la longueur maximale
+    max_length <- max(length(var_types$categorical), length(var_types$numerical))
+    
+    # Étendre les deux listes à la longueur maximale
+    categorical_vars <- c(var_types$categorical, rep(NA, max_length - length(var_types$categorical)))
+    numerical_vars <- c(var_types$numerical, rep(NA, max_length - length(var_types$numerical)))
+    
+    # Créer un data frame pour l'affichage
+    data.frame(
+      Categorical = categorical_vars,
+      Numerical = numerical_vars,
+      stringsAsFactors = FALSE
+    )
+  }, options = list(pageLength = 5, searching = TRUE))
+  
+  
+  
+  # Utilisez une valeur réactive pour contrôler quel tableau est affiché
   currentBoxView <- reactiveVal(NULL)
   
   observeEvent(input$show_Uni_var, {
@@ -285,51 +419,201 @@ server <- function(input, output, session) {
     currentBoxView("sample_details")
   })
   
+  
+  
+  
   # plot 
   output$visualUI <- renderUI({
+    # Générer la page  de uni var  uniquement lorsque l'utilisateur clique sur "Détails" 
     if(currentBoxView() == "uni_var_details") {
       fluidPage(
-        h1("Détails pour Uni Var"),
-        h1("Categorical"),
-      fluidRow(
-        box(title = "Select categorical", width = 4,
-            selectInput("univarCategorical", "Variable", "")
+        h2("Variable Categorielle"),
+        fluidRow(
+          box( width = 15,
+               selectInput("univarCategorical", "choisir la variable", choices = NULL)
+          )),
+        fluidRow(
+          box(title = "Diagrammes en secteurs", height = 460, width = 6,
+              plotlyOutput("selectedUnivarCategorical")
+          ),
+          box(title = "Diagrammes en secteurs", height = 460, width = 6,
+              plotlyOutput("univarTargetVariablePlot")
+          )),
+        h2("Variable Numerique"),
+        fluidRow(
+          h3("Variable Numerique Discrete"),
+          box( width = 15,
+               selectInput("univarNumericaldisc", "choisir la variable", choices = NULL)
+          )),
+        fluidRow(
+          box(height = 460, width = 6,
+              plotlyOutput("univarNumericalbarplot") 
+          ),
+          box(height = 460, width = 6,
+              plotlyOutput("univarNumericalbarcumul")
+          )),
+        fluidRow(
+          box(height = 460, width = 12,
+              plotlyOutput("univarNumericalbarBmoust")
+          )
         ),
-        box(height = 460, width = 4,
-            plotlyOutput("selectedUnivarCategorical") %>% withSpinner(color="#0dc5c1")
-        ),
-        box(title = "Target variable", height = 460, width = 4,
-            plotlyOutput("univarTargetVariablePlot") %>% withSpinner(color="#0dc5c1")
-        )
-      ),
-      fluidRow(
-        h1("Numerical"),
-        box(title = "Select numerical", width = 4,
-            selectInput("univarNumerical", "Variable", "")
-        )
-      ),
-      fluidRow(
-        box(height = 460, width = 4,
-            plotlyOutput("univarNumericalBox") %>% withSpinner(color="#0dc5c1")
-        ),
-        box(height = 460, width = 8,
-            plotlyOutput("univarNumericalHist") %>% withSpinner(color="#0dc5c1")
-        )
+        fluidRow(
+          h3("Variable Numerique Continue"),
+          box( width = 15,
+               selectInput("univarNumericalcont", "choisir la variable", choices = NULL),
+               sliderInput("bins", "Nombre de classes (K):", min = 1, max = 30, value = 10)
+          )),
+        fluidRow(
+          box(height = 460, width = 6,
+              plotlyOutput("univarNumericalHist") 
+          ),
+          box(height = 460, width = 6,
+              plotlyOutput("univarNumericalCden")
+          )),
       )
-  )
+      # Générer la page  de bi var  uniquement lorsque l'utilisateur clique sur "Détails" 
     } else if(currentBoxView() == "bi_var_details") {
       fluidPage(
-        h1("Détails pour Bi Var")
-        # ... (ajoutez les éléments spécifiques à Bi Var)
-      )
+        h1("tous les var Numeriques"),
+        fluidRow(
+          box(title="Correlation Matrix", height = "460", width = 15,
+              plotOutput("correlation") 
+          )),
+        h1("Interaction entre deux  variable"),
+        
+        fluidRow(height = "460", width = 15,
+                 box(title = "Numerique vs Categorielle", width = 15,
+                     selectInput("numericalVScategorical", "Numerique", choices = NULL),
+                     selectInput("categoricalVSnumerical", "Categorielle", choices = NULL)
+                 )),
+        fluidRow(         
+          box(height = "460", width = 15,
+              plotlyOutput("variance")
+          )),
+        fluidRow(height = "460", width = 15,
+                 box(title = "Numerique vs Numerique", width = 15,
+                     selectInput("numericalVSnumerical", "Numerique", ""),
+                     selectInput("numericalVSnumerical2", "Numerique", "")
+                 )),
+        fluidRow(
+          box(height = "460", width = 15,
+              plotlyOutput("scatter")
+          )),
+        h1("Target Distribution"),
+        fluidRow(
+          box(width = 15,
+              selectInput("distribution", "Categorielle",  choices = NULL)
+          )),
+        fluidRow(
+          box(width = 15, height = "460",
+              plotlyOutput("distributionPlot")
+          )))
+      # Générer la page  de splitting  uniquement lorsque l'utilisateur clique sur "Détails" 
     } else if (currentBoxView() == "sample_details") {
       fluidPage(
         h1("Détails pour Splitting")
-        # ... (ajoutez les éléments spécifiques à Splitting)
+        
       )
-    }
-    }
+    }}
   )
+  
+  
+  
+  
+  #------------------Uni variable------------------------------  
+  ## var categorielle ----------  
+  # Fonction pour créer le diagramme circulaire
+  output$selectedUnivarCategorical <- renderPlotly({
+    req(input$target, input$univarCategorical)
+    pie_bivar <- plot_ly(
+      labels = ~df[[input$target]],
+      type = 'pie',
+      domain = list(x = c(0.45, 1)),
+      marker = list(colors = 'Set1'))
+    pie_bivar})
+  
+  # Fonction pour créer le diagramme circulaire
+  output$univarTargetVariablePlot <- renderPlotly({
+    req(input$univarCategorical)
+    pie_univar <- plot_ly(
+      labels = ~df[[input$univarCategorical]],
+      type = 'pie',
+      marker = list(colors = 'Set1')
+    )
+    pie_univar
+  })
+  
+  ## var num discert ---------------  
+  
+  # Commande pour l'affichage du plot des effectifs
+  output$univarNumericalbarplot <- renderPlotly({
+    req(input$univarNumericaldisc)  # Assurez-vous que la variable est sélectionnée
+    createBarPlot(df, input$univarNumericaldisc, input$univarNumericaldisc, "Fréquences", "Fréquences ")
+  })
+  
+  # Commande pour l'affichage du plot des fréquences cumulées
+  output$univarNumericalbarcumul <- renderPlotly({
+    req(input$univarNumericaldisc)  # Assurez-vous que la variable est sélectionnée
+    createCumulativePlot(df[[input$univarNumericaldisc]], input$univarNumericaldisc, "Fréquences cumulées", "Fréquences cumulées ")
+  })
+  
+  # Commande pour l'affichage du plot de Boîte à moustaches
+  output$univarNumericalbarBmoust <- renderPlotly({
+    req(input$univarNumericaldisc)  # Assurez-vous que la variable est sélectionnée
+    createBoxplot(df, input$univarNumericaldisc, input$univarNumericaldisc, "Boîte à moustaches ", 0.3)
+  })
+  
+  ## var num cont
+  # Fonction réactive pour mettre à jour le nombre de classes---------------
+  
+  output$univarNumericalHist <- renderPlotly({
+    variable <- input$univarNumericalcont
+    bins <- input$bins
+    
+    if (is.null(variable)) return(NULL)
+    
+    p <- plot_ly(df, x = ~get(variable), type = "histogram", nbins = bins)
+    
+    # Personnalisation supplémentaire si nécessaire
+    p <- p %>% layout(title = paste("Histogramme de", variable))
+    
+    p
+  })
+  
+  # Observer réactif pour les changements dans 'bins' et 'univarNumericalcont'
+  observeEvent(c(input$bins, input$univarNumericalcont), {
+    output$univarNumericalHist <- renderPlotly({
+      variable <- input$univarNumericalcont
+      bins <- input$bins
+      
+      if (is.null(variable)) return(NULL)
+      
+      p <- plot_ly(df, x = ~get(variable), type = "histogram", nbins = bins)
+      
+      # Personnalisation supplémentaire si nécessaire
+      p <- p %>% layout(title = paste("Histogramme de", variable))
+      
+      p
+    })
+  })
+  
+  
+  # fonction courbe cumulative ---------------
+  output$univarNumericalCden <- renderPlotly({
+    createCumulativePlotCont(df$input$univarNumericalcont, "Fréquence Cumulative", "Variable X", "Courbe Cumulative")
+  })
+  #plotlyOutput("univarNumericalHist")plotlyOutput("univarNumericalCden")
+  
+  #------------------Bi variable-------------
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
 }
-
 shinyApp(ui, server)
