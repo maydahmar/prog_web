@@ -33,17 +33,29 @@ normalizeData <- function(df) {
   return(df)
 }
 
-# Fonction de dummification
 dummifyData <- function(df) {
+  cat_columns_before <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
   df[] <- lapply(df, function(x) {
     if (is.factor(x) || is.character(x)) {
-      model.matrix(~ x - 1)[, -1]
+      dummy_matrix <- model.matrix(~ x - 1)[, -1]
+      cat_columns_after <- names(dummy_matrix)
+      message("Cat columns before: ", paste(cat_columns_before, collapse = ", "))
+      message("Cat columns after: ", paste(cat_columns_after, collapse = ", "))
+      
+      # Check the frequencies of categories in dummy_matrix
+      for (col in cat_columns_after) {
+        cat_freq <- table(dummy_matrix[, col])
+        message(paste("Category frequencies for", col, ":", toString(cat_freq)))
+      }
+      
+      dummy_matrix
     } else {
       x
     }
   })
   return(df)
 }
+
 
 
 # Fonction pour imputer les données manquantes selon le type
@@ -199,6 +211,41 @@ ui <- dashboardPage(
                              )
                            )
                          )
+                ),
+                tabPanel("Regression",
+                         fluidRow(
+                           h2(" Performance metric"),
+                           selectInput("targetVariablereg", "Variable Cible", choices = NULL),
+                           actionButton("trainRegression", "Entraîner les Modèles"),
+                           h2(" Graphique des Résidus"),
+                           fluidRow(
+                             box(
+                               title = "Régression Linéaire", height = "470px", width = 4,
+                               plotOutput("reslm") 
+                             ),
+                             box(
+                               title ="Arbre de Décision", height = "470px", width = 4,
+                               plotOutput("resrpart") 
+                             )
+                           ),
+                           fluidRow(
+                             box(
+                               title = "Random Forest", height = "470px", width = 4,
+                               plotlyOutput("resrf") 
+                             ),
+                             box(
+                               title = "Régression Ridge", height = "470px", width = 4,
+                               plotlyOutput("resrg") 
+                             )
+                           )
+                         ),
+                         fluidRow(
+                           h2(" Comparaison des métriques"),
+                           box(
+                             height = "470px", width = 4,
+                             plotlyOutput("metriquesreg") 
+                           )
+                         )
                 )
     )
   )
@@ -226,6 +273,9 @@ server <- function(input, output, session) {
     # Mettre à jour le select input avec la dernière colonne par défaut
     last_column_name <- tail(names(df), 1)
     updateSelectInput(session, "targetVariable", choices = names(df), selected = last_column_name)
+    
+    updateSelectInput(session, "targetVariablereg", choices = names(df), selected = last_column_name)
+    
     
     dataOriginal(df)
     dataProcessed(df)
@@ -539,6 +589,38 @@ server <- function(input, output, session) {
     
     # Afficher la matrice de confusion
     plot_confusion_matrix(confusion_rf, title = "Matrice de Confusion - RANDOM FOREST")
+  })
+  
+  trained_model_reg <- reactiveValues( lm = NULL, rpart = NULL, rf = NULL, ridge = NULL)
+  test_reg <- reactiveValues(X_test_reg = NULL, Y_test_reg = NULL)
+  train_reg <- reactiveValues(dat_reg = NULL, X_train_reg = NULL, Y_train_reg = NULL)
+  
+  observeEvent(input$trainRegression, {
+    req(dataOriginal(), input$targetVariablereg)
+    
+    df <-dataOriginal()
+    
+    #print(str(df))
+    df_dummified <- dummify(df)
+    print(str(df_dummified))
+    # Séparer les données en variables explicatives (X) et variable cible (Y)
+    X <- df_dummified[, -which(names(df_dummified) == input$targetVariablereg, arr.ind = TRUE)]
+    Y <- df_dummified[, input$targetVariablereg]
+    
+    # Diviser les données en ensembles d'entraînement et de test (80% train, 20% test)
+    set.seed(123)  # Pour la reproductibilité
+    splitIndex <- createDataPartition(Y, p = 0.8, list = FALSE)
+    train_reg$X_train_reg <- X[splitIndex, ]
+    train_reg$Y_train_reg <- Y[splitIndex]
+    test_reg$X_test_reg <- X[-splitIndex, ]
+    test_reg$Y_test_reg <- Y[-splitIndex]
+    
+    
+    trained_model_reg$lm <- lm(train_reg$Y_train_reg ~ ., data = train_reg$X_train_reg )
+    trained_model_reg$rpart <- rpart(train_reg$Y_train_reg ~ ., data = train_reg$X_train_reg , method = "anova")
+    trained_model_reg$rf <- randomForest(train_reg$X_train_reg , train_reg$Y_train_reg)
+    trained_model_reg$lr <- train(train_reg$X_train_reg , train_reg$Y_train_reg, method = "ridge")
+    
   })
   
   
