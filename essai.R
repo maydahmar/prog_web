@@ -142,6 +142,14 @@ plot_confusion_matrix <- function(confusion, title) {
     )
 }
 
+# Fonction pour calculer les métriques et les stocker dans la liste
+calculate_metrics <- function(model, X_test, Y_test) {
+  predictions <- predict(model, newdata = X_test)
+  rmse <- sqrt(mean((Y_test - predictions)^2))
+  mae <- mean(abs(Y_test - predictions))
+  return(c(RMSE = rmse, MAE = mae))
+}
+
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
@@ -229,23 +237,23 @@ ui <- dashboardPage(
                                title ="Arbre de Décision", height = "470px", width = 4,
                                plotOutput("resrpart") 
                              )
-                           ),
-                           fluidRow(
-                             box(
-                               title = "Random Forest", height = "470px", width = 4,
-                               plotlyOutput("resrf") 
-                             ),
-                             box(
-                               title = "Régression Ridge", height = "470px", width = 4,
-                               plotlyOutput("resrg") 
-                             )
                            )
+                           #fluidRow(
+                           #  box(
+                           #    title = "Random Forest", height = "470px", width = 4,
+                           #    plotlyOutput("resrf") 
+                           #  ),
+                           #  box(
+                           #    title = "Régression Ridge", height = "470px", width = 4,
+                           #    plotlyOutput("resrg") 
+                           #  )
+                           #)
                          ),
                          fluidRow(
                            h2(" Comparaison des métriques"),
                            box(
                              height = "470px", width = 4,
-                             plotlyOutput("metriquesreg") 
+                             plotOutput("metriquesreg") 
                            )
                          )
                 )
@@ -613,16 +621,17 @@ server <- function(input, output, session) {
   train_reg <- reactiveValues(dat_reg = NULL, X_train_reg = NULL, Y_train_reg = NULL)
   
   observeEvent(input$trainRegression, {
-    req(dataOriginal(), input$targetVariablereg)
+    req(dataOriginal(), input$targetVariablereg, train_reg, test_reg, trained_model_reg)
     
-    df <-dataOriginal()
+    # Identifier les variables numériques
+    numeric_vars <- sapply(dataOriginal(), function(column) is.numeric(column))
     
-    #print(str(df))
-    df_dummified <- dummify(df)
-    print(str(df_dummified))
+    # Extraire les colonnes des variables numériques
+    df_numeric <- dataOriginal()[numeric_vars]
+    
     # Séparer les données en variables explicatives (X) et variable cible (Y)
-    X <- df_dummified[, -which(names(df_dummified) == input$targetVariablereg, arr.ind = TRUE)]
-    Y <- df_dummified[, input$targetVariablereg]
+    X <- df_numeric[, -which(names(df_numeric) == input$targetVariablereg, arr.ind = TRUE)]
+    Y <- df_numeric[, input$targetVariablereg]
     
     # Diviser les données en ensembles d'entraînement et de test (80% train, 20% test)
     set.seed(123)  # Pour la reproductibilité
@@ -635,9 +644,52 @@ server <- function(input, output, session) {
     
     trained_model_reg$lm <- lm(train_reg$Y_train_reg ~ ., data = train_reg$X_train_reg )
     trained_model_reg$rpart <- rpart(train_reg$Y_train_reg ~ ., data = train_reg$X_train_reg , method = "anova")
-    trained_model_reg$rf <- randomForest(train_reg$X_train_reg , train_reg$Y_train_reg)
-    trained_model_reg$lr <- train(train_reg$X_train_reg , train_reg$Y_train_reg, method = "ridge")
+    #trained_model_reg$rf <- randomForest(train_reg$X_train_reg , train_reg$Y_train_reg)
+    #trained_model_reg$lr <- train(train_reg$X_train_reg , train_reg$Y_train_reg, method = "ridge")
     
+  })
+  
+  output$reslm <- renderPlot({
+    req(predictions,train_reg)
+    
+    # Récupérer les résidus du modèle de régression linéaire
+    residuals <- residuals(trained_model_reg$lm)
+    
+    # Créer un graphique de résidus avec plot
+    plot(train_reg$Y_train_reg, residuals, main = "Graphique de Résidus",
+         xlab = "Valeurs Observées", ylab = "Résidus")
+  })
+  
+  output$resrpart <- renderPlot({
+    req(trained_model_reg,train_reg)
+    
+    # Récupérer les résidus du modèle de régression linéaire
+    residuals <- residuals(trained_model_reg$rpart)
+    
+    # Créer un graphique de résidus avec plot
+    plot(train_reg$Y_train_reg, residuals, main = "Graphique de Résidus",
+         xlab = "Valeurs Observées", ylab = "Résidus")
+  })
+  
+  
+  output$metriquesreg <- renderPlot({
+    req(test_reg, trained_model_reg)
+    
+    # Comparer différentes métriques entre les deux modèles (ajouté)
+    metrics_lm <- calculate_metrics(trained_model_reg$lm, test_reg$X_test_reg, test_reg$Y_test_reg)
+    metrics_rf <- calculate_metrics(trained_model_reg$rpart, test_reg$X_test_reg, test_reg$Y_test_reg)
+    
+    metrics_df <- data.frame(
+      Model = c("Régression Linéaire", "Random Forest"),
+      RMSE = c(metrics_lm["RMSE"], metrics_rf["RMSE"]),
+      MAE = c(metrics_lm["MAE"], metrics_rf["MAE"])
+    )
+    
+    # Créer un graphique à barres
+    barplot(t(as.matrix(metrics_df[, -1])), beside = TRUE, col = c("blue", "green"), 
+            legend.text = metrics_df$Model, 
+            main = "Comparaison des Métriques entre les Modèles",
+            ylab = "Scores", xlab = "Métriques")
   })
   
   
