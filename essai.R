@@ -170,6 +170,9 @@ ui <- dashboardPage(
                            box(title = "Outliers", status = "danger", solidHeader = TRUE, width = 4,
                                collapsible = TRUE, actionButton("show_outliers", "Détails")),
                            
+                           box(title = "Colonne Constante", status = "info", solidHeader = TRUE, width = 4, 
+                               collapsible = TRUE, actionButton("show_constant", "Détails")),
+                           
                            box(title = "Variables manquantes", status = "primary", solidHeader = TRUE, width = 4, 
                                collapsible = TRUE, actionButton("show_missing", "Détails")),
                            
@@ -265,6 +268,7 @@ server <- function(input, output, session) {
   dataOriginal <- reactiveVal(NULL)
   dataProcessed <- reactiveVal(NULL)
   reactiveOutliers <- reactiveVal(NULL)
+  reactiveConstantColumns <- reactiveVal(NULL)
   
   observeEvent(input$load, {
     inFile <- input$file1
@@ -394,9 +398,61 @@ server <- function(input, output, session) {
   
   
   
+  # Function to detect constant columns
+  detectConstantColumns <- function(df) {
+    constant_df <- sapply(df, function(x) length(unique(x)) == 1)
+    const_cols <- names(df)[constant_df]
+    
+    data.frame(
+      Variable = const_cols,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  removeConstantColumns <- function(df, const_cols) {
+    df[ , !(names(df) %in% const_cols)]
+  }
   
   
+  observeEvent(input$show_constant, {
+    req(dataProcessed())
+    constant_cols_df <- detectConstantColumns(dataProcessed())
+    reactiveConstantColumns(constant_cols_df) # Store the constant columns
+    
+    
+    output$dynamicTableUI <- renderUI({
+      if (nrow(reactiveConstantColumns()) > 0) {
+        tagList(
+          DTOutput("constantColsTable"),
+          hr(),
+          actionButton("remove_const_cols", "Remove Constant Columns")
+        )
+      } else {
+        tagList(
+          h4("No constant columns detected.")
+        )
+      }
+    })
+  })
   
+  
+  output$constantColsTable <- renderDT({
+    req(reactiveConstantColumns())
+    reactiveConstantColumns()
+  }, options = list(pageLength = 5, searching = FALSE))
+  
+  
+  observeEvent(input$remove_const_cols, {
+    req(reactiveConstantColumns())
+    data <- dataProcessed() # Get the current data
+    const_cols <- reactiveConstantColumns()$Variable
+    
+    updated_data <- removeConstantColumns(data, const_cols)
+    dataProcessed(updated_data) # Update the processed data without constant columns
+    output$dynamicTableUI <- renderUI({
+      h4("Constant columns removed.")
+    })
+  })
   
   
   # Mettre à jour le tableau des détails des valeurs manquantes dynamiquement
