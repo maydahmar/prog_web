@@ -13,6 +13,7 @@ library(plotly)
 library(kernlab)
 library(e1071)
 library(pROC)
+library(dplyr)
 
 
 # Fonction pour calculer le mode
@@ -277,11 +278,20 @@ server <- function(input, output, session) {
     ext <- tools::file_ext(inFile$datapath)
     df <- switch(ext,
                  csv = { read.csv(inFile$datapath) },
-                 dat = { read.table(inFile$datapath) },
+                 dat = { read.table(inFile$datapath, col.names = c('age', 'sexe', 'chest pain type', 'resting blood pressure', 'serum cholestoral', 'fasting_blood_sugar', 'resting electrocardiographic results','maximum heart rate achieved','exercise induced angina','oldpeak', 'slope of the peak', 'major vessels', 'thal', 'absence')) },
                  txt = { read.delim(inFile$datapath) },
                  data = read.table(inFile$datapath, header = TRUE, sep = ","),
                  stop("Type de fichier non supporté")
     )
+    
+    df<- cbind(df, NouvelleColonne = 1.0)
+    # Attribuer un titre à la nouvelle colonne
+    colnames(df)[ncol(df)] <- "cst"
+    
+    # Supposons que "MaVariable" est la colonne dans laquelle vous voulez introduire des valeurs manquantes
+    set.seed(123)  # Pour rendre les résultats reproductibles
+    df <- mutate(df, age = ifelse(runif(n()) < 0.1, NA, age))
+    
     
     # Update the select input for the target variable
     # Mettre à jour le select input avec la dernière colonne par défaut
@@ -373,7 +383,7 @@ server <- function(input, output, session) {
   output$dataTable <- renderDT({
     req(dataProcessed())
     dataProcessed()
-  }, options = list(pageLength = 10, autoWidth = TRUE))
+  }, options = list(pageLength = 10, autoWidth = TRUE, scrollX = TRUE))
   
   # Générer le tableau des valeurs manquantes uniquement lorsque l'utilisateur clique sur "Détails" sous "Variables manquantes"
   output$missingDetailsTable <- renderDT({
@@ -381,7 +391,7 @@ server <- function(input, output, session) {
       req(dataProcessed())
       calculateMissingDetails(dataProcessed())
     }
-  }, options = list(pageLength = 5, searching = FALSE))
+  }, options = list(pageLength = 5, searching = FALSE, scrollX = TRUE))
   
   
   
@@ -391,7 +401,7 @@ server <- function(input, output, session) {
       req(dataProcessed())
       detectOutliers(dataProcessed())
     }
-  }, options = list(pageLength = 5, searching = FALSE))
+  }, options = list(pageLength = 5, searching = FALSE, scrollX = TRUE))
   
   
   
@@ -439,7 +449,7 @@ server <- function(input, output, session) {
   output$constantColsTable <- renderDT({
     req(reactiveConstantColumns())
     reactiveConstantColumns()
-  }, options = list(pageLength = 5, searching = FALSE))
+  }, options = list(pageLength = 5, searching = FALSE, scrollX = TRUE))
   
   
   observeEvent(input$remove_const_cols, {
@@ -478,7 +488,7 @@ server <- function(input, output, session) {
     # Configurer l'affichage du tableau des valeurs manquantes
     output$missingDetailsTable <- renderDT({
       df_details
-    }, options = list(pageLength = 5, searching = FALSE))
+    }, options = list(pageLength = 5, searching = FALSE, scrollX = TRUE))
   })
   
   
@@ -525,7 +535,7 @@ server <- function(input, output, session) {
       Numerical = numerical_vars,
       stringsAsFactors = FALSE
     )
-  }, options = list(pageLength = 5, searching = TRUE))
+  }, options = list(pageLength = 5, searching = TRUE, scrollX = TRUE))
   
   
   
@@ -549,7 +559,7 @@ server <- function(input, output, session) {
     # Update the table to reflect the changes
     output$outliersTable <- renderDT({
       detectOutliers(dataProcessed())
-    }, options = list(pageLength = 5, autoWidth = TRUE))
+    }, options = list(pageLength = 5, autoWidth = TRUE, scrollX = TRUE))
   })
   
   output$visualisationPlot <- renderPlot({
