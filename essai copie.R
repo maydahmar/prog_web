@@ -164,14 +164,6 @@ createCumulativePlotCont <- function(x, x_label, y_label, title) {
   return(fig)
 }
 
-# Fonction pour créer un histogramme 
-get.histo <- function(dataset, x.name, bins){
-  hist_data <- hist(dataset[[x.name]], breaks = bins, plot = FALSE)
-  fig <- plot_ly(x = hist_data$mids, y = hist_data$counts, type = "histogram", nbinsx = length(bins)-1)
-  title <- paste0("Histo of ", x.name)
-  fig <- layout(fig, yaxis = list(title = list(text = "Counts")), title = list(text = title))
-  return(config(fig, modeBarButtonsToRemove = button.to.remove, displaylogo = F))
-}
 
 
 # ------------------------------------------------------------ UI ------------------------------------------------------------
@@ -243,37 +235,32 @@ server <- function(input, output, session) {
     dataOriginal(df)
     dataProcessed(df)
   })
-#-------- 
   
+  # Fonction pour filtrer les variables categorielle ou numerique 
+  sortVariables <- function(data) {
+    numeric_vars <- names(Filter(is.numeric, data))
+    categorical_vars <- names(Filter(function(x) is.factor(x) | is.character(x), data))
+    
+    return(list(numerical = numeric_vars, categorical = categorical_vars))
+  }
   
+  sorted_vars <- sortVariables(df)
   
+  # Fonction pour filtrer les variables numerique discret ou continue  
+  sortQuantitativeVariables <- function(data) {
+    quantitative_vars <- sorted_vars$numerical
+    discrete_vars <- quantitative_vars[sapply(data[, quantitative_vars], function(x) length(unique(x)) < 10)] # Vous pouvez ajuster la limite 10 selon vos besoins
+    continuous_vars <- setdiff(quantitative_vars, discrete_vars)
+    
+    return(list(discret = discrete_vars, continue = continuous_vars))
+  }
+  
+  sorted_quant_vars <- sortQuantitativeVariables(df)
   
   
   # Appliquer ou annuler la normalisation et la dummification
   observe({
     req(dataOriginal())
-    
-    # Fonction pour filtrer les variables categorielle ou numerique 
-    sortVariables <- function(data) {
-      numeric_vars <- names(Filter(is.numeric, data))
-      categorical_vars <- names(Filter(function(x) is.factor(x) | is.character(x), data))
-      
-      return(list(numerical = numeric_vars, categorical = categorical_vars))
-    }
-    
-    sorted_vars <- sortVariables(dataOriginal())
-    
-    # Fonction pour filtrer les variables numerique discret ou continue  
-    sortQuantitativeVariables <- function(data) {
-      quantitative_vars <- sorted_vars$numerical
-      discrete_vars <- quantitative_vars[sapply(data[, quantitative_vars], function(x) length(unique(x)) < 10)] # Vous pouvez ajuster la limite 10 selon vos besoins
-      continuous_vars <- setdiff(quantitative_vars, discrete_vars)
-      
-      return(list(discret = discrete_vars, continue = continuous_vars))
-    }
-    
-    sorted_quant_vars <- sortQuantitativeVariables(dataOriginal())
-
     df <- dataOriginal()
     
     if (input$normalize) {
@@ -283,7 +270,6 @@ server <- function(input, output, session) {
     if (input$dummy) {
       df <- dummifyData(df)
     }
-    
     
     dataProcessed(df)
     
@@ -417,7 +403,7 @@ server <- function(input, output, session) {
   }, options = list(pageLength = 5, searching = TRUE))
   
   
- 
+  
   # Utilisez une valeur réactive pour contrôler quel tableau est affiché
   currentBoxView <- reactiveVal(NULL)
   
@@ -434,7 +420,7 @@ server <- function(input, output, session) {
   })
   
   
-#------
+  
   
   # plot 
   output$visualUI <- renderUI({
@@ -475,7 +461,7 @@ server <- function(input, output, session) {
           h3("Variable Numerique Continue"),
           box( width = 15,
                selectInput("univarNumericalcont", "choisir la variable", choices = NULL),
-               sliderInput("bins", "Nombre de classes (K):", min = 1, max = 30, value = 15)
+               sliderInput("bins", "Nombre de classes (K):", min = 1, max = 30, value = 10)
           )),
         fluidRow(
           box(height = 460, width = 6,
@@ -557,7 +543,7 @@ server <- function(input, output, session) {
     pie_univar
   })
   
-  ## -----var num discert ---------------  
+  ## var num discert ---------------  
   
   # Commande pour l'affichage du plot des effectifs
   output$univarNumericalbarplot <- renderPlotly({
@@ -577,46 +563,47 @@ server <- function(input, output, session) {
     createBoxplot(df, input$univarNumericaldisc, input$univarNumericaldisc, "Boîte à moustaches ", 0.3)
   })
   
-#---------------var num cont ---------
-  # histogramme ---------------
+  ## var num cont
+  # Fonction réactive pour mettre à jour le nombre de classes---------------
   
-  # Créer une fonction réactive pour calculer l'histogramme avec plotly
-  histogram_data_plotly <- reactive({
-    data <- df[[input$univarNumericalcont]]
-    plot_ly(x = data, type = "histogram", nbins = input$bins) %>%
-      layout(title = paste("Histogramme de la variable", input$univarNumericalcont, "(Classes =", input$bins, ")"),
-             xaxis = list(title = input$univarNumericalcont),
-             yaxis = list(title = "Fréquence"))
-  })
-  
-  # Afficher l'histogramme
   output$univarNumericalHist <- renderPlotly({
-    histogram_data_plotly()
+    variable <- input$univarNumericalcont
+    bins <- input$bins
+    
+    if (is.null(variable)) return(NULL)
+    
+    p <- plot_ly(df, x = ~get(variable), type = "histogram", nbins = bins)
+    
+    # Personnalisation supplémentaire si nécessaire
+    p <- p %>% layout(title = paste("Histogramme de", variable))
+    
+    p
   })
   
-  # Utiliser observeEvent pour mettre à jour l'histogramme lorsque le slider change
-  observeEvent(input$bins, {
- 
-    rv$hist_isFreq <- TRUE; 
-    rv$hist_yLabel <- "Effectifs"
-
+  # Observer réactif pour les changements dans 'bins' et 'univarNumericalcont'
+  observeEvent(c(input$bins, input$univarNumericalcont), {
+    output$univarNumericalHist <- renderPlotly({
+      variable <- input$univarNumericalcont
+      bins <- input$bins
+      
+      if (is.null(variable)) return(NULL)
+      
+      p <- plot_ly(df, x = ~get(variable), type = "histogram", nbins = bins)
+      
+      # Personnalisation supplémentaire si nécessaire
+      p <- p %>% layout(title = paste("Histogramme de", variable))
+      
+      p
+    })
   })
   
-  # Afficher l'histogramme ggplot
-  output$univarNumericalHist_ggplot <- renderPlot({
-    data <- df[[input$univarNumericalcont]]
-    hist(data(), freq = rv$hist_isFreq, cex.axis = 1.5, cex.main = 1.5,
-         main = "Histogramme de l'indice de fécondite", col = rv$hist_col,
-         xlab = "Indice de fécondité", ylab = rv$hist_yLabel, las = 1,
-         breaks = seq(0.8, 3, by = 0.2), right = FALSE, cex.lab = 1.5)
+  
+  # fonction courbe cumulative ---------------
+  output$univarNumericalCden <- renderPlotly({
+    createCumulativePlotCont(df$input$univarNumericalcont, "Fréquence Cumulative", "Variable X", "Courbe Cumulative")
   })
+  #plotlyOutput("univarNumericalHist")plotlyOutput("univarNumericalCden")
   
-  
-  
-  
-  
-  #univarNumericalcont "bins
-  # courbe------------- 
   #------------------Bi variable-------------
   
   
