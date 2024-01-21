@@ -290,7 +290,7 @@ server <- function(input, output, session) {
     
     # Supposons que "MaVariable" est la colonne dans laquelle vous voulez introduire des valeurs manquantes
     set.seed(123)  # Pour rendre les résultats reproductibles
-    df <- mutate(df, age = ifelse(runif(n()) < 0.1, NA, age))
+    #df <- mutate(df, age = ifelse(runif(n()) < 0.1, NA, age))
     
     
     # Update the select input for the target variable
@@ -597,7 +597,8 @@ server <- function(input, output, session) {
   observeEvent(input$trainClassification, {
     req(dataOriginal(), input$file1, input$targetVariable, probabilities, predictions, train_class, test_class)
     
-    df <- dataOriginal()
+    df <- imputeData(dataOriginal(), input$quantitative_method, input$qualitative_method)
+    #df <- dataOriginal()
     
     # Séparer les données en variables explicatives (X) et variable cible (Y)
     X <- df[, -which(names(df) == input$targetVariable, arr.ind = TRUE)]
