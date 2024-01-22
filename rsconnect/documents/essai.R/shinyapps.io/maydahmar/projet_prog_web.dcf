@@ -1,0 +1,13 @@
+name: projet_prog_web
+title: projet_prog_web
+username: maydahmar
+account: maydahmar
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 10989033
+bundleId: 8170098
+url: https://maydahmar.shinyapps.io/projet_prog_web/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: projet.R

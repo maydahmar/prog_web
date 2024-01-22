@@ -14,6 +14,10 @@ library(kernlab)
 library(e1071)
 library(pROC)
 library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(philentropy)
+library(ROSE)
 
 
 # Fonction pour calculer le mode
@@ -151,6 +155,185 @@ calculate_metrics <- function(model, X_test, Y_test) {
   return(c(RMSE = rmse, MAE = mae))
 }
 
+# Univar --------------------------
+#Fonction de camembert  
+pie <- function(dataset, x.name) {
+  fig <- plot_ly(dataset, labels = ~dataset[[x.name]], type = 'pie')
+  fig <- fig %>% layout(
+    title = paste0("Proportion de ", x.name),
+    xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+    yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE)
+  )
+  return(fig)
+}
+
+# Fonction pour créer un diagramme en bâtons des effectifs 
+createBarPlot <- function(data, variable, x_label, y_label, title) {
+  freq_table <- table(data[[variable]])
+  fig <- plot_ly(x = as.numeric(names(freq_table)), y = freq_table, type = 'bar')
+  fig <- fig %>% layout(xaxis = list(title = x_label), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+button.to.remove <- c("zoom", "pan", "select", "zoomIn", "zoomOut", "autoScale", "resetScale", "lasso2d", "hoverClosestCartesian", "hoverCompareCartesian")
+
+# Fonction pour créer un diagramme cumulatif des effectifs 
+createCumulativePlot <- function(x, x_label, y_label, title) {
+  freq_table <- table(x)
+  freq_x <- freq_table/sum(length(x))
+  cum_freq <- cumsum(freq_x)
+  fig <- plot_ly(x = names(freq_table), y = cum_freq, type = 'bar')
+  fig <- fig %>% layout(xaxis = list(title = x_label), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+# Fonction pour créer un boite a moustache 
+createBoxplot <- function(data, variable, y_label, title, box_size = 0.3) {
+  fig <- plot_ly(data, y = ~data[[variable]], type = 'box', boxpoints = 'outliers')
+  fig <- fig %>% layout(yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+# Fonction pour créer un courbe cululitive 
+createCumulativePlotCont <- function(data, variable, y_label, title) {
+  freq_table <- table(data[[variable]])
+  cum_freq <- cumsum(freq_table)
+  x_vals <- as.numeric(names(freq_table))
+  y_vals <- cum_freq
+  fig <- plot_ly() %>%
+    add_trace(
+      type = 'scatter',
+      mode = 'markers+lines',
+      x = x_vals,
+      y = y_vals,
+      marker = list(color = 'green4'),
+      line = list(color = 'green4', width = 2)
+    ) %>%
+    layout(xaxis = list(title = variable), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+#Fonction pour cree un histogramme pour variable continue 
+createHistogram <- function(data, variable, bins, x_label, y_label, title) {
+  fig <- plot_ly()
+  
+  if (!is.null(bins)) {
+    fig <- fig %>% add_histogram(x = ~data[[variable]], histnorm = 'probability density', nbinsx = bins)
+  } else {
+    fig <- fig %>% add_histogram(x = ~data[[variable]], histnorm = 'probability density')
+  }
+  
+  fig <- fig %>% layout(xaxis = list(title = x_label), yaxis = list(title = y_label), title = title)
+  return(fig)
+}
+
+#Fonction pour cree un courbe cumulative pour variable continue 
+createCumulativePlot <- function(data, variable, bins, x_label, y_label, title) {
+  fig <- plot_ly()
+  
+  if (!is.null(bins)) {
+    # Créer l'histogramme avec le nombre de bacs spécifié
+    hist <- hist(data[[variable]], breaks = bins, plot = FALSE)
+    # Calculer les fréquences cumulées
+    cum_freq <- cumsum(hist$counts)
+    # Tracer la courbe cumulative
+    fig <- fig %>% add_trace(
+      type = 'scatter',
+      mode = 'lines',
+      x = hist$mids,
+      y = cum_freq,
+      line = list(color = 'blue'),
+      name = 'Cumulative'
+    )
+  } else {
+    # Créer l'histogramme avec le nombre de bacs par défaut
+    fig <- fig %>% add_histogram(
+      x = ~data[[variable]],
+      histnorm = 'probability density'
+    )
+    # Calculer les fréquences cumulées à partir de l'histogramme
+    cum_freq <- cumsum(fig$data[[1]]$y)
+    # Tracer la courbe cumulative
+    fig <- fig %>% add_trace(
+      type = 'scatter',
+      mode = 'lines',
+      x = fig$data[[1]]$x,
+      y = cum_freq,
+      line = list(color = 'blue'),
+      name = 'Cumulative'
+    )
+  }
+  # Configurer la mise en page
+  fig <- fig %>% layout(
+    xaxis = list(title = x_label),
+    yaxis = list(title = y_label),
+    title = title
+  )
+  
+  return(fig)
+}
+
+
+#Bivar---------
+
+#Fonction pour cree un nuage de points pour deux variables 
+createScatterPlot <- function(data, x_variable, y_variable, x_label, y_label, title) {
+  fig <- plot_ly(data, x = ~data[[x_variable]], y = ~data[[y_variable]], mode = 'markers')
+  
+  fig <- fig %>% layout(
+    xaxis = list(title = x_label),
+    yaxis = list(title = y_label),
+    title = title
+  )
+  
+  return(fig)
+}
+
+
+
+#Fonction pour cree un nuage de points pour deux variables 
+calculate_and_visualize_correlation <- function(dataset, var1, var2) {
+  # Subset the dataset to include only the relevant columns
+  subset_data <- dataset[, c(var1, var2), drop = FALSE]
+  # Remove rows with missing values in either variable
+  subset_data <- na.omit(subset_data)
+  # Calculate the correlation matrix
+  correlation_matrix <- cor(subset_data)
+  # Visualize the correlation matrix
+  corrplot(correlation_matrix, method = "color")
+}
+
+# Function to calculate and visualize the correlation
+calculate_and_plot_correlation <- function(data) {
+  # Exclure les colonnes avec une variance nulle
+  non_constant_vars <- sapply(data, function(x) {
+    var_value <- var(x, na.rm = TRUE)
+    if (var_value == 0) {
+      cat("Variance nulle dans la colonne:", names(x), "\n")
+    }
+    var_value > 0
+  })
+  
+  data <- data[, non_constant_vars, drop = FALSE]
+  
+  # Filtrer uniquement les variables numériques
+  data_num <- Filter(is.numeric, data)
+  
+  # Vérifier les statistiques descriptives pour les colonnes problématiques
+  problematic_columns <- names(data_num)[sapply(data_num, function(x) sd(x, na.rm = TRUE) == 0)]
+  if (length(problematic_columns) > 0) {
+    cat("Colonnes avec écart-type zéro:", problematic_columns, "\n")
+  }
+  
+  # Calculer la matrice de corrélation
+  correlation_matrix <- cor(data_num, use = "complete.obs")
+  
+  # Créer un graphique de corrélation
+  corrplot(correlation_matrix, method = "color")
+}
+
+
+
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "Analyse Avancée de Données"),
@@ -186,15 +369,38 @@ ui <- dashboardPage(
                 tabPanel("Données Dummifiées", 
                          DTOutput("tableDummified")),
                 
-                tabPanel("Plot", value = "plot_panel", plotOutput("dataPlot")),
-                tabPanel("Déséquilibre des Classes",
-                         DTOutput("tableVariableTypes")
-                ),
+                tabPanel(" Echantillonage ", 
+                         fluidRow(
+                           column(12,
+                                  box(title = " Dataset  ", width = 15, height ="150px",
+                                      textOutput("balanceMessage")
+                                  ))),
+                         fluidRow(
+                           column(6,
+                                  box(title = "Methode de reequilibrage des classes ", width = 15,height = "200px",
+                                      radioButtons("someRadioButton", "choisir la methode ", choices = c("Sous-échantillonnage", "Sur-échantillonnage"))),
+                                  uiOutput("tableVariableTypes")),
+                           
+                           column(6,
+                                  box(title = "Variable", width = 15,height = "200px",
+                                      selectInput(
+                                        "target", "Target Variable", choices = NULL
+                                      ) 
+                                  )))
+                ),tabPanel(" Visualisation", value = "visual_panel",
+                           fluidRow(
+                             box(title = "Uni var", status = "primary", solidHeader = TRUE, width = 4, 
+                                 collapsible = TRUE, actionButton("show_Uni_var", "Détails")),
+                             box(title = "Bi Var", status = "warning", solidHeader = TRUE, width = 4,
+                                 collapsible = TRUE, actionButton("show_Bi_var", "Détails")),
+                           ),
+                           uiOutput("visualUI"))
+                ,
                 tabPanel("ACP Visualisation",
                          radioButtons("visualizationType", "Correlation entre les :",
                                       choices = c("Individus" = "ind", "Variables" = "var"), selected = "VAR"),
                          sliderInput("numObservations", "Nombre d'observations à inclure dans l'ACP:",
-                                     min = 1, max = 3750, value = 100, step = 1),
+                                     min = 1, max = 300, value = 100, step = 1),
                          plotOutput("visualisationPlot")
                 ),
                 tabPanel("Classification",
@@ -256,7 +462,7 @@ ui <- dashboardPage(
                          fluidRow(
                            h2(" Comparaison des métriques"),
                            box(
-                             height = "470px", width = 4,
+                             height = "470px", width = 6,
                              plotOutput("metriquesreg") 
                            )
                          )
@@ -318,7 +524,7 @@ server <- function(input, output, session) {
       dataProcessed()  # Renvoie les données dummifiées pour l'affichage
     })
   })
-   
+  
   # Appliquer ou annuler la normalisation et la dummification
   observe({
     req(dataOriginal())
@@ -329,8 +535,8 @@ server <- function(input, output, session) {
     }
     
     #if (input$dummy) {
-     # df <- dummifyData(df)
-   # }
+    # df <- dummifyData(df)
+    # }
     
     
     
@@ -563,13 +769,15 @@ server <- function(input, output, session) {
   })
   
   output$visualisationPlot <- renderPlot({
-    req(dataOriginal, input$visualizationType,input$numObservations)
+    req(dataOriginal(), input$visualizationType,input$numObservations)
+    
+    df <- imputeData(dataOriginal(), input$quantitative_method, input$qualitative_method)
     
     # Identifier les variables numériques
-    numeric_vars <- sapply(dataOriginal(), function(column) is.numeric(column))
+    numeric_vars <- sapply(df, function(column) is.numeric(column))
     
     # Extraire les colonnes des variables numériques
-    df_numeric <- dataOriginal()[numeric_vars]
+    df_numeric <- df[numeric_vars]
     
     # Sélection des premières observations en fonction du slider
     df_subset <- df_numeric[1:input$numObservations, ]
@@ -641,7 +849,7 @@ server <- function(input, output, session) {
   output$rocSvm <- renderPlot({
     req(test_class, probabilities)
     
-
+    
     # Créer la courbe ROC avec les probabilités postérieures
     roc_svm <- roc(test_class$Y_test_class, probabilities$svm)
     
@@ -757,8 +965,457 @@ server <- function(input, output, session) {
             legend.text = metrics_df$Model, 
             main = "Comparaison des Métriques entre les Modèles",
             ylab = "Scores", xlab = "Métriques")
+    
+    # Ajouter des annotations en dessous de l'axe des x
+    mtext(side = 1, text = sprintf("RMSE: %.2f", metrics_df$RMSE), at = c(1, 2), line = 3, col = "blue", cex = 0.8)
+    mtext(side = 1, text = sprintf("MAE: %.2f", metrics_df$MAE), at = c(1, 2), line = 1, col = "green", cex = 0.8)
   })
   
+  
+  
+  # Visualisation 
+  
+  # Utilisez une valeur réactive pour contrôler quel tableau est affiché
+  currentViewVisual <- reactiveVal(NULL)
+  observeEvent(input$show_Uni_var, {
+    currentViewVisual("uni_var")
+  })
+  
+  # Observateur pour le bouton d'affichage des données
+  observeEvent(input$show_Bi_var, {
+    # Utiliser la valeur réactive pour afficher les données
+    currentViewVisual("bi_var")
+  })
+  
+  output$visualUI <- renderUI({
+    if(currentViewVisual() == "uni_var") {
+      fluidPage(
+        fluidRow(
+          h2("Variable Categorielle"),
+          fluidRow(
+            box( width = 15,selectInput("univarCategorical", "choisir la variable", choices = NULL)
+            )),
+          fluidRow(
+            box(title = "Diagrammes en secteurs", height = 460, width = 15,
+                plotlyOutput("univarVariablePlot") )
+          ),
+          h2("Variable Numerique"),
+          fluidRow(
+            h3("Variable Numerique Discrete"),
+            box( width = 15,selectInput("univarNumericaldisc", "choisir la variable", choices = NULL)
+            )),
+          fluidRow(
+            box(height = 460, width = 6,plotlyOutput("univarNumericalbarplot") ),
+            box(height = 460, width = 6,plotlyOutput("univarNumericalbarcumul"))
+          ),
+          fluidRow(
+            box(height = 460, width = 12,plotlyOutput("univarNumericalbarBmoust"))
+          ),
+          fluidRow(h3("Variable Numerique Continue"),
+                   box( width = 15,selectInput("univarNumericalcont", "choisir la variable", choices = NULL),
+                        sliderInput("bins", "Nombre de classes (K):", min = 1, max = 50, value = 10)
+                   )),
+          fluidRow(
+            box(height = 460, width = 6,plotlyOutput("univarNumericalHist") 
+            ),
+            box(height = 460, width = 6, plotlyOutput("univarNumericalCden")
+            )
+          ),
+        )
+      )
+      # Générer la page  de bi var  uniquement lorsque l'utilisateur clique sur "Détails" 
+    } else if(currentViewVisual() == "bi_var") {
+      fluidPage(
+        h1("tous les var Numeriques"),
+        fluidRow(
+          box(title="Correlation Matrix", height = "460", width = 15,
+              plotOutput("correlation") 
+          )),
+        h1("Interaction entre deux  variable"),
+        
+        fluidRow(height = "460", width = 15,
+                 box(title = "Numerique vs Categorielle", width = 15,
+                     selectInput("numericalVScategorical", "Numerique", choices = NULL),
+                     selectInput("categoricalVSnumerical", "Categorielle", choices = NULL)
+                 )),
+        fluidRow(         
+          box(height = "460", width = 15,
+              plotlyOutput("boite_para")
+          )),
+        fluidRow(height = "460", width = 15,
+                 box(title = "Numerique vs Numerique", width = 15,
+                     selectInput("numericalVSnumerical", "Numerique", ""),
+                     selectInput("numericalVSnumerical2", "Numerique", "")
+                 )),
+        fluidRow(
+          box(height = "460", width = 15,
+              plotlyOutput("scatter")
+          )),
+        fluidRow(height = "460", width = 15,
+                 box(title = "Categorielle vs Categorielle", width = 15,
+                     selectInput("categoricalVScategorical", "Categorielle", choices = NULL),
+                     selectInput("categoricalVScategorical2", "Categorielle", choices = NULL)
+                 )),
+        fluidRow(
+          box(width = 15, height = "460",
+              plotlyOutput("histo_profil")
+          )),
+        fluidRow(
+          h3("Les métriques d'evaluation "),
+          box(width = 15, height = 250,
+              tableOutput("association_table")
+          ))
+        
+      ) 
+    }
+  })
+  
+  # Définition de la fonction pour analyser les variables
+  analyse_variables <- function(data) {
+    numeric <- names(Filter(function(x) is.numeric(x) , data))
+    numeric_discrete <- names(Filter(function(x) is.numeric(x) && length(unique(x)) <= 10, data))
+    numeric_continuous <- names(Filter(function(x) is.numeric(x) && length(unique(x)) > 10, data))
+    categorical <- names(Filter(function(x) is.factor(x) || is.character(x), data))
+    
+    return(list(numeric_discrete = numeric_discrete,
+                numeric_continuous = numeric_continuous,
+                categorical = categorical,
+                numeric= numeric))
+  }
+  
+  variables <- reactive({
+    analyse_variables(dataOriginal())
+  })
+  
+  observe({
+    req(dataOriginal(),variables())
+    
+    updateSelectInput(session, "target", choices = names(dataOriginal()) ,selected = input$target)
+    
+    updateSelectInput(session, "numericalVScategorical", choices = variables()$numeric ,selected = input$numericalVScategorical)
+    
+    updateSelectInput(session, "categoricalVSnumerical", choices = variables()$categorical  ,selected = input$categoricalVSnumerical)
+    
+    updateSelectInput(session, "categoricalVScategorical", choices = variables()$categorical ,selected = input$categoricalVScategorical)
+    
+    updateSelectInput(session, "categoricalVScategorical2", choices = variables()$categorical  ,selected = input$categoricalVScategorical2)
+    
+    updateSelectInput(session, "numericalVSnumerical", choices = variables()$numeric,selected = input$numericalVSnumerical)
+    
+    updateSelectInput(session, "numericalVSnumerical2", choices = variables()$numeric,selected = input$numericalVSnumerical2)
+    
+    updateSelectInput(session, "univarCategorical", choices = variables()$categorical  ,selected = input$univarCategorical )
+    
+    updateSelectInput(session, "univarNumericaldisc", choices = variables()$numeric_discrete ,selected = input$univarNumericaldisc)
+    
+    updateSelectInput(session, "univarNumericalcont", choices = variables()$numeric_continuous  ,selected = input$univarNumericalcont)
+  })
+  
+  #------------------Uni variable------------------------------  
+  ## var categorielle-------   
+  # Fonction pour créer le diagramme circulaire
+  output$univarVariablePlot <- renderPlotly({
+    req(dataOriginal(),input$univarCategorical)
+    df <- dataOriginal()
+    pie_univar <- plot_ly(
+      labels = ~df[[input$univarCategorical]],
+      type = 'pie',
+      marker = list(colors = 'Set1')
+    )
+    pie_univar
+  })
+  
+  ## var num discert ---------------  
+  
+  # Commande pour l'affichage du plot des effectifs
+  output$univarNumericalbarplot <- renderPlotly({
+    req(input$univarNumericaldisc)  # Assurez-vous que la variable est sélectionnée
+    createBarPlot(dataOriginal(), input$univarNumericaldisc, input$univarNumericaldisc, "Fréquences", "Fréquences ")
+  })
+  
+  # Commande pour l'affichage du plot des fréquences cumulées
+  output$univarNumericalbarcumul <- renderPlotly({
+    req(input$univarNumericaldisc)  # Assurez-vous que la variable est sélectionnée
+    createCumulativePlotCont(dataOriginal(),input$univarNumericaldisc, "Fréquences cumulées", "Fréquences cumulées ")
+  })
+  
+  # Commande pour l'affichage du plot de Boîte à moustaches
+  output$univarNumericalbarBmoust <- renderPlotly({
+    req(input$univarNumericaldisc)  # Assurez-vous que la variable est sélectionnée
+    createBoxplot(dataOriginal(), input$univarNumericaldisc, input$univarNumericaldisc, "Boîte à moustaches ", 0.3)
+  })
+  
+  ## var num cont-------------------
+  # Affichage  de l'histogramme
+  output$univarNumericalHist <- renderPlotly({
+    req(input$univarNumericalcont)  # Assurez-vous que la variable est sélectionnée
+    createHistogram(dataOriginal(), input$univarNumericalcont, bins = input$bins, 
+                    x_label = input$univarNumericalcont, y_label = "Fréquence", 
+                    title = paste("Histogramme de", input$univarNumericalcont))
+  })
+  
+  # Affichage de la courbe cumulative 
+  output$univarNumericalCden <- renderPlotly({
+    req(input$univarNumericalcont, input$bins)  # Assurez-vous que la variable et le nombre de bacs sont sélectionnés
+    
+    # Appeler la fonction createCumulativePlot
+    createCumulativePlot(
+      data = dataOriginal(),
+      variable = input$univarNumericalcont,
+      bins = input$bins,
+      x_label = input$univarNumericalcont,
+      y_label = "Fréquences cumulées",
+      title = paste("Courbe cumulative de", input$univarNumericalcont)
+    )
+  })
+  
+  #------------------bi variable------------------------------ 
+  ## all var num----------
+  # Filtrer les variables avec une variance non nulle
+  non_constant_vars <- reactive({
+    df <- dataOriginal()
+    # Sélectionner uniquement les colonnes numériques
+    # df[sapply(df, is.numeric)]
+    Filter(function(x) is.numeric(x) && sd(x)!= 0 , df)
+  })
+  # Calculer la matrice de corrélation lorsque les données sont chargées
+  correlation_matrix <- reactive({
+    cor(non_constant_vars(), use = "pairwise.complete.obs")
+  })
+  # Afficher la matrice de corrélation en utilisant corrplot
+  output$correlation <- renderPlot({
+    corrplot(correlation_matrix(), method = "color")
+  })
+  
+  ## num/num nuage de points -------------
+  output$scatter <- renderPlotly({
+    req(dataOriginal(),input$numericalVSnumerical,input$numericalVSnumerical2)
+    data <- dataOriginal()
+    # Sélection des variables en fonction des sélecteurs d'entrée
+    x_variable <- data[[input$numericalVSnumerical]]
+    y_variable <- data[[input$numericalVSnumerical2]]
+    
+    # Création du graphique scatter avec plot_ly
+    plot_ly(data, x = x_variable, y = y_variable, mode = "markers") %>%
+      layout(title = "Scatter Plot",
+             xaxis = list(title = input$numericalVSnumerical),
+             yaxis = list(title = input$numericalVSnumerical2))
+  })
+  
+  ## num/ cat boite parallele--------
+  output$boite_para <- renderPlotly({
+    req(dataOriginal(), input$numericalVScategorical, input$categoricalVSnumerical)
+    data <- dataOriginal()
+    
+    plot_ly(data, x = ~get(input$categoricalVSnumerical), y = ~get(input$numericalVScategorical), type = "box", color = ~get(input$categoricalVSnumerical)) %>%
+      layout(title = paste("Boîtes à moustaches de", input$numericalVScategorical, "pour chaque catégorie", input$categoricalVSnumerical),
+             xaxis = list(title = input$categoricalVSnumerical),
+             yaxis = list(title = input$numericalVScategorical))
+  })
+  
+  ## cat/cat diag profil
+  
+  ## Utilisez les noms de colonnes dynamiques--------
+  data_aggregated <- reactive({
+    req(dataOriginal(), input$categoricalVScategorical, input$categoricalVScategorical2)
+    
+    df <- dataOriginal()
+    col1 <- input$categoricalVScategorical
+    col2 <- input$categoricalVScategorical2
+    
+    data_aggregated <- df %>%
+      group_by(!!sym(col1), !!sym(col2)) %>%
+      summarise(Frequency = n()) %>%
+      ungroup()
+    
+    return(data_aggregated)
+  })
+  
+  output$histo_profil <- renderPlotly({
+    req(data_aggregated())
+    # Utilisez les noms de colonnes dynamiques
+    col1 <- input$categoricalVScategorical
+    col2 <- input$categoricalVScategorical2
+    
+    gg <- ggplot(data_aggregated(), aes(x = !!sym(col1), y = Frequency, fill = !!sym(col2))) +
+      geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+      labs(x = col1, y = "Fréquence", fill = col2) +
+      theme_minimal()
+    
+    # Convertissez le ggplot en plotly
+    ggplotly(gg)
+  })
+  
+  
+  
+  ## mesures---------
+  output$association_table <- renderTable({
+    req(dataOriginal(), input$categoricalVScategorical, input$categoricalVScategorical2)
+    # Sélection des variables
+    data <- dataOriginal()
+    var1 <- data[[input$categoricalVScategorical]]
+    var2 <- data[[input$categoricalVScategorical2]]
+    
+    # Tableau de contingence
+    contingency_table <- table(var1, var2)
+    
+    # Calcul des mesures d'association
+    chi2 <- chisq.test(contingency_table, simulate.p.value = TRUE)$statistic
+    phi2 <- sqrt(chi2 / (sum(contingency_table) * min(nrow(contingency_table) - 1, ncol(contingency_table) - 1)))
+    cramer_v <- sqrt(phi2 / min(nrow(contingency_table) - 1, ncol(contingency_table) - 1))
+    tschuprow_t <- sqrt(chi2 / sum(contingency_table))
+    
+    # Création d'un tableau avec les mesures
+    result_table <- data.frame(
+      Mesure = c("Khi-2", "Phi2", "Cramer's V", "Tschuprow's T"),
+      Valeur = c(chi2, phi2, cramer_v, tschuprow_t)
+    )
+    result_table
+  })
+  
+  
+  
+  
+  
+  #------------------ desequilibre------------------------------ 
+  
+  # Fonction pour vérifier l'équilibre du dataset----
+  checkBalance <- function(data) {
+    if (is.null(data) || nrow(data) == 0) {
+      message <- "Aucun dataset n'est disponible."
+      return(list(is_balanced = NA, message = message))
+    }
+    
+    # Compter le nombre d'occurrences de chaque classe
+    class_counts <- table(data$target_column)  # Remplacez "target_column" par le nom de votre colonne cible
+    
+    # Calculer la proportion de chaque classe
+    class_proportions <- prop.table(class_counts)
+    
+    # Déterminer le seuil pour considérer le dataset comme équilibré
+    balance_threshold <- 0.99  # Vous pouvez ajuster ce seuil en fonction de vos besoins
+    
+    # Vérifier si la proportion de chaque classe est supérieure au seuil
+    is_balanced <- all(class_proportions >= balance_threshold)
+    
+    # Afficher le message approprié
+    if (is_balanced) {
+      message <- "Le dataset est équilibré."
+    } else {
+      message <- "Le dataset est déséquilibré."
+    }
+    
+    # Retourner le résultat
+    return(list(is_balanced = is_balanced, message = message))
+  }
+  
+  output$balanceMessage <- renderText({
+    result <- checkBalance(dataOriginal()) 
+    result$message
+  })
+  
+  #Fonction de undersample------
+  # Fonction pour l'undersampling avec affichage par groupe de 5
+  undersample_data <- function(data, target_column) {
+    #
+    
+    return(final_data)
+  }
+  
+  
+  
+  #Fonction de oversample-------
+  oversample_data <- function(data, target_variable) {
+    positive_class <- data[data[[target_variable]] == "classe_minoritaire",]
+    negative_class <- data[data[[target_variable]] == "classe_majoritaire",]
+    
+    # Sur-échantillonnage aléatoire de la classe minoritaire
+    positive_class <- positive_class[sample(nrow(positive_class), nrow(negative_class), replace = TRUE),]
+    
+    # Combinaison des deux classes
+    balanced_data <- rbind(positive_class, negative_class)
+    
+    return(balanced_data)
+  }
+  
+  
+  
+  
+  
+  
+  # choix de la methode----
+  observe({
+    method <- input$someRadioButton
+    
+    if (method == "Sous-échantillonnage") {
+      # Code pour afficher des éléments spécifiques au sous-échantillonnage
+      output$tableVariableTypes <- renderUI({
+        # Vérifier si dataOriginal() et input$target sont disponibles
+        req(dataOriginal(), input$target)
+        
+        # Charger les données originales
+        df <- dataOriginal()
+        
+        # Extraire la variable cible
+        target <- df[[input$target]]
+        
+        # Effectuer le suréchantillonnage
+        data.balanced <- df
+        
+        # Afficher la table des données originales
+        originalTable <- tableOutput("originalTable")
+        
+        # Afficher la table des données suréchantillonnées
+        balancedTable <- tableOutput("balancedTable")
+        
+        fluidRow(
+          column(12, originalTable),
+          column(12, balancedTable)
+        )
+        
+        
+      })
+    } else if (method == "Sur-échantillonnage") {
+      # Code pour afficher des éléments spécifiques au sur-échantillonnage
+      output$tableVariableTypes <- renderUI({
+        req(dataOriginal(),input$target)
+        # Charger les données originales
+        df <- dataOriginal()
+        
+        # Extraire la variable cible
+        target <- df[[input$target]]
+        
+        # Effectuer le suréchantillonnage
+        data.balanced <- df
+        
+        # Afficher la table des données originales
+        originalTable <- tableOutput("originalTable")
+        
+        # Afficher la table des données suréchantillonnées
+        balancedTable <- tableOutput("balancedTable")
+        fluidRow(
+          column(12, originalTable),
+          column(12, balancedTable)
+        )
+        
+      })
+    } else {
+      # Par défaut, afficher un message générique
+      output$tableVariableTypes <- renderUI({
+        tags$p("Sélectionnez une méthode de rééquilibrage.")
+      })
+    }
+  })
+  
+  output$originalTable <- renderTable({
+    # Code pour afficher la table originale
+    df
+  })
+  
+  output$balancedTable <- renderTable({
+    # Code pour afficher la table équilibrée (balanced_data)
+    balanced_data
+  })
   
 }
 
